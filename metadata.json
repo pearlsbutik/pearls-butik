@@ -1,0 +1,6 @@
+{
+  "name": "Pearls Butik",
+  "description": "Premium clothing boutique and fashion designing institute by Pratibha Ingole. Stitch Your Style, Wear Your Confidence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
