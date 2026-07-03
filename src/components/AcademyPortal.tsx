@@ -267,7 +267,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const fetchState = async (email: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
+      const res = await apifetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data) {
         setCurrentUser(data.user);
@@ -379,7 +379,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setIsProcessingPayment(true);
 
     try {
-      const res = await fetch('/api/academy/auth/send-otp', {
+      const res = await apiFetch("/api/academy/auth/send-otp", {
+        method: "POST",
+        body: JSON.stringify(data)
+       })
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: loginPhone, isLogin: true })
@@ -413,11 +416,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setIsProcessingPayment(true);
 
     try {
-      const res = await fetch('/api/academy/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: loginPhone, otp: loginOtpCode })
-      });
+      const res = await apiFetch("/api/academy/auth/send-otp", {
+         method: "POST",
+         body: JSON.stringify(data)
+       })
       const data = await res.json();
       if (res.ok && data.success) {
         setShowLoginModal(false);
@@ -444,11 +446,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const handleResendLoginOtp = async () => {
     if (resendCooldown > 0) return;
     try {
-      const res = await fetch('/api/academy/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: loginPhone, isLogin: true })
-      });
+      const res = await apiFetch("/api/academy/auth/send-otp", {
+         method: "POST",
+         body: JSON.stringify(data)
+       })
       const data = await res.json();
       if (res.ok && data.success) {
         setLoginSimulatedOtp(data.simulatedOtp);
