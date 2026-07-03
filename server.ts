@@ -4,6 +4,15 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
+
+// CORS
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "https://pearls-butik.vercel.app");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -17,29 +26,23 @@ app.use((req, res, next) => {
   next();
 });
 
-dotenv.config();
-
-const app = express();
-const PORT = 3000;
-
-// Middleware
-app.use(express.json());
-
-// Initialize Gemini SDK with telemetry headers
+// Initialize Gemini SDK
 const apiKey = process.env.GEMINI_API_KEY;
 let ai: GoogleGenAI | null = null;
 
 if (apiKey) {
   ai = new GoogleGenAI({
-    apiKey: apiKey,
+    apiKey,
     httpOptions: {
       headers: {
-        'User-Agent': 'aistudio-build',
-      }
-    }
+        "User-Agent": "aistudio-build",
+      },
+    },
   });
 } else {
-  console.warn("GEMINI_API_KEY is not defined. AI Stylist features will run with fallback recommendations.");
+  console.warn(
+    "GEMINI_API_KEY is not defined. AI Stylist features will run with fallback recommendations."
+  );
 }
 
 // Memory database for demo persistence
