@@ -269,7 +269,9 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const fetchState = async (email: string) => {
     setIsLoading(true);
     try {
-      const data = await apiFetch("/api/academy/state");
+      const data = await apiFetch(
+  `/api/academy/state?email=${encodeURIComponent(email)}`
+);
       if (data) {
         setCurrentUser(data.user);
         setCourses(data.courses);
