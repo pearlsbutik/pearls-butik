@@ -9,8 +9,7 @@ import {
   RefreshCw, Play, CheckCircle2, Info, Star, MessageSquare, Bell, CreditCard,
   Search, ShieldCheck, AlertTriangle
 } from 'lucide-react';
-import { apiFetch } from "@/lib/api";
-import { apiFetch } from "../lib/api";
+import { apiFetch } from '../lib/api';
 
 // Interfaces mirroring the backend
 interface User {
@@ -269,10 +268,11 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const fetchState = async (email: string) => {
     setIsLoading(true);
     try {
-      const data = await apiFetch(
-  `/api/academy/state?email=${encodeURIComponent(email)}`
-);
-      if (data) {
+      const res = await apiFetch(
+        `/api/academy/state?email=${encodeURIComponent(email)}`
+      );
+      const data = await res.json();
+      if (res.ok && data) {
         setCurrentUser(data.user);
         setCourses(data.courses);
         setLiveSessions(data.liveClasses);
