@@ -9,6 +9,7 @@ import {
   RefreshCw, Play, CheckCircle2, Info, Star, MessageSquare, Bell, CreditCard,
   Search, ShieldCheck, AlertTriangle
 } from 'lucide-react';
+import { apiFetch } from "@/lib/api";
 
 // Interfaces mirroring the backend
 interface User {
