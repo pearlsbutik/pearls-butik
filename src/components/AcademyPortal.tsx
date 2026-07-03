@@ -10,6 +10,7 @@ import {
   Search, ShieldCheck, AlertTriangle
 } from 'lucide-react';
 import { apiFetch } from "@/lib/api";
+import { apiFetch } from "../lib/api";
 
 // Interfaces mirroring the backend
 interface User {
@@ -268,7 +269,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const fetchState = async (email: string) => {
     setIsLoading(true);
     try {
-      const res = await apifetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
+      const res = await apiFetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data) {
         setCurrentUser(data.user);
@@ -380,7 +381,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setIsProcessingPayment(true);
 
     try {
-      const res = await apifetch('/api/academy/auth/send-otp', {
+      const res = await apiFetch('/api/academy/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: loginPhone, isLogin: true })
@@ -414,7 +415,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setIsProcessingPayment(true);
 
     try {
-      const res = await apifetch('/api/academy/auth/verify-otp', {
+      const res = await apiFetch('/api/academy/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: loginPhone, otp: loginOtpCode })
@@ -445,7 +446,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const handleResendLoginOtp = async () => {
     if (resendCooldown > 0) return;
     try {
-      const res = await apifetch('/api/academy/auth/send-otp', {
+      const res = await apiFetch('/api/academy/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: loginPhone, isLogin: true })
