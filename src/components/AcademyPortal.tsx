@@ -378,16 +378,20 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setLoginError('');
     setIsProcessingPayment(true);
 
-    try {
-      const res = await apiFetch("/api/academy/auth/send-otp", {
-        method: "POST",
-        body: JSON.stringify(data)
-       })
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: loginPhone, isLogin: true })
-      });
-      const data = await res.json();
+ try {
+  const data = await apiFetch("/api/academy/auth/send-otp", {
+    method: "POST",
+    body: JSON.stringify({
+      phone: loginPhone,
+      isLogin: true,
+    }),
+  });
+
+  // use `data` here
+}
+catch (error) {
+  console.error(error);
+}
       if (res.ok && data.success) {
         setLoginStep(2);
         setLoginOtpTimer(600); // 10 minutes
