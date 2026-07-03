@@ -267,7 +267,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const fetchState = async (email: string) => {
     setIsLoading(true);
     try {
-      const res = await apifetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
+      const res = await fetch(`/api/academy/state?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data) {
         setCurrentUser(data.user);
@@ -378,32 +378,29 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setLoginError('');
     setIsProcessingPayment(true);
 
- try {
-  const data = await apiFetch("/api/academy/auth/send-otp", {
-    method: "POST",
-    body: JSON.stringify({
-      phone: loginPhone,
-      isLogin: true,
-    }),
-  });
-
-  if (data.success) {
-    setLoginStep(2);
-    setLoginOtpTimer(600);
-    setLoginSimulatedOtp(data.simulatedOtp);
-    setLoginOtpAttempts(5);
-    showToast("WhatsApp OTP dispatched!");
-  } else {
-    setLoginError(
-      data.error || "Failed to dispatch OTP. Please verify details."
-    );
-  }
-} catch (err) {
-  console.error(err);
-  setLoginError("Server network error. Please try again.");
-} finally {
-  setIsProcessingPayment(false);
-}
+    try {
+      const res = await fetch('/api/academy/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: loginPhone, isLogin: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setLoginStep(2);
+        setLoginOtpTimer(600); // 10 minutes
+        setLoginSimulatedOtp(data.simulatedOtp);
+        setLoginOtpAttempts(5);
+        showToast("WhatsApp OTP dispatched!");
+      } else {
+        setLoginError(data.error || "Failed to dispatch OTP. Please verify details.");
+      }
+    } catch (err) {
+      console.error(err);
+      setLoginError("Server network error. Please try again.");
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
 
   // Handler: Verify Login OTP
   const handleLoginVerifyOtp = async (e: React.FormEvent) => {
@@ -416,10 +413,11 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setIsProcessingPayment(true);
 
     try {
-      const res = await apiFetch("/api/academy/auth/send-otp", {
-         method: "POST",
-         body: JSON.stringify(data)
-       })
+      const res = await fetch('/api/academy/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: loginPhone, otp: loginOtpCode })
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         setShowLoginModal(false);
@@ -446,10 +444,11 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const handleResendLoginOtp = async () => {
     if (resendCooldown > 0) return;
     try {
-      const res = await apiFetch("/api/academy/auth/send-otp", {
-         method: "POST",
-         body: JSON.stringify(data)
-       })
+      const res = await fetch('/api/academy/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: loginPhone, isLogin: true })
+      });
       const data = await res.json();
       if (res.ok && data.success) {
         setLoginSimulatedOtp(data.simulatedOtp);
