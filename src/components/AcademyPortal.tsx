@@ -387,27 +387,20 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     }),
   });
 
-  // use `data` here
+    setLoginStep(2);
+    setLoginOtpTimer(600);
+    setLoginSimulatedOtp(data.simulatedOtp);
+    setLoginOtpAttempts(5);
+    showToast("WhatsApp OTP dispatched!");
+  } else {
+    setLoginError(
+      data.error || "Failed to dispatch OTP. Please verify details."
+    );
+  }
+  setLoginError("Server network error. Please try again.");
+} finally {
+  setIsProcessingPayment(false);
 }
-catch (error) {
-  console.error(error);
-}
-      if (res.ok && data.success) {
-        setLoginStep(2);
-        setLoginOtpTimer(600); // 10 minutes
-        setLoginSimulatedOtp(data.simulatedOtp);
-        setLoginOtpAttempts(5);
-        showToast("WhatsApp OTP dispatched!");
-      } else {
-        setLoginError(data.error || "Failed to dispatch OTP. Please verify details.");
-      }
-    } catch (err) {
-      console.error(err);
-      setLoginError("Server network error. Please try again.");
-    } finally {
-      setIsProcessingPayment(false);
-    }
-  };
 
   // Handler: Verify Login OTP
   const handleLoginVerifyOtp = async (e: React.FormEvent) => {
