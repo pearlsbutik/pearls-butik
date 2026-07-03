@@ -387,6 +387,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     }),
   });
 
+  if (data.success) {
     setLoginStep(2);
     setLoginOtpTimer(600);
     setLoginSimulatedOtp(data.simulatedOtp);
@@ -397,6 +398,8 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       data.error || "Failed to dispatch OTP. Please verify details."
     );
   }
+} catch (err) {
+  console.error(err);
   setLoginError("Server network error. Please try again.");
 } finally {
   setIsProcessingPayment(false);
