@@ -17,9 +17,21 @@ app.use(express.json());
 
 // CORS
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "https://pearls-butik.vercel.app");
+  const origin = req.headers.origin || "";
+  if (
+    origin === "https://pearls-butik.vercel.app" || 
+    origin.endsWith(".vercel.app") || 
+    origin === "http://localhost:3000" || 
+    origin === "http://localhost:5173" ||
+    origin === "http://127.0.0.1:3000" ||
+    origin === "http://127.0.0.1:5173"
+  ) {
+    res.header("Access-Control-Allow-Origin", origin);
+  } else {
+    res.header("Access-Control-Allow-Origin", "https://pearls-butik.vercel.app");
+  }
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
   res.header("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") {
@@ -1509,7 +1521,7 @@ app.post("/api/auth/login", (req, res) => {
 });
 
 // 3. Verify OTP (Activated)
-app.post("/api/auth/verify-otp-auth", (req, res) => {
+const verifyStudentOtp = (req: express.Request, res: express.Response) => {
   const { phone, otp } = req.body;
 
   if (!phone || !otp) {
@@ -1557,7 +1569,10 @@ app.post("/api/auth/verify-otp-auth", (req, res) => {
     user,
     token
   });
-});
+};
+
+app.post("/api/auth/verify-otp", verifyStudentOtp);
+app.post("/api/auth/verify-otp-auth", verifyStudentOtp);
 
 // 4. Resend OTP
 app.post("/api/auth/resend-otp", (req, res) => {
@@ -2098,6 +2113,30 @@ app.post("/api/consultation", async (req, res) => {
       courseSuggestion: "Enroll in our 'Blouse & Dress Pattern Making Course' to master the architectural secrets behind this exact silhouette."
     });
   }
+});
+
+// ==========================================
+// API 404 AND ERROR HANDLER MIDDLEWARES
+// ==========================================
+
+// 404 Handler for API routes
+app.use("/api/*", (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Route not found"
+  });
+});
+
+// Error Handler for API routes
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Unhandled API Error:", err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || "Internal Server Error"
+  });
 });
 
 // Vite & Static Asset Handling
