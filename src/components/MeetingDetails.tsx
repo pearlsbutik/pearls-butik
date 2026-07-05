@@ -79,6 +79,10 @@ export default function MeetingDetails({ session, userRole, onClose, onUpdate }:
       });
       if (data && data.success) {
         onUpdate(data.liveClass);
+        if (newStatus === 'live' && session.meetingLink) {
+          // Open the meeting link in a new tab to bypass iframe sandbox limits
+          window.open(session.meetingLink, '_blank');
+        }
       }
     } catch (err) {
       console.error("Error updating status:", err);

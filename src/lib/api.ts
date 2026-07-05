@@ -19,9 +19,15 @@ const API_URL = getApiUrl();
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<any> {
   const url = endpoint.startsWith('http') ? endpoint : `${API_URL}${endpoint}`;
+  
+  // Auto inject stored JWT authorization token
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+
   const response = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...(options.headers || {}),
     },
     ...options,

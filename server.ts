@@ -3,6 +3,9 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import fs from "fs";
 
 dotenv.config();
 
@@ -235,7 +238,7 @@ let submissions = [
     courseTitle: 'Basic Dress Designing Course',
     userEmail: 'student@pearls.com',
     userName: 'Neha Sharma',
-    fileUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=800',
+    fileUrl: 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800',
     fileName: 'straight_seams_neha.jpg',
     submittedAt: '2026-06-28',
     marks: undefined,
@@ -271,7 +274,20 @@ let attendanceLogs = [
 
 // 1. Get Global Academy State
 app.get("/api/academy/state", (req, res) => {
-  const email = req.query.email as string || 'student@pearls.com';
+  let email = req.query.email as string || 'student@pearls.com';
+  
+  const authHeader = req.headers['authorization'];
+  if (authHeader) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      if (decoded && decoded.email) {
+        email = decoded.email;
+      }
+    } catch (e) {
+      // Token is invalid/expired
+    }
+  }
   
   // Find current user profile
   const user = academyUsers.find(u => u.email === email) || academyUsers[1];
@@ -435,6 +451,82 @@ app.post("/api/academy/classes/action", (req, res) => {
 
 let liveClassJoins: any[] = [];
 
+// ==========================================
+// FILE-BASED PERSISTENT DATABASE SYSTEM
+// ==========================================
+const DB_FILE = path.join(process.cwd(), 'database.json');
+
+function saveDB() {
+  try {
+    const data = {
+      subscribers,
+      academyUsers,
+      academySubscriptions,
+      upiPayments,
+      otpCodes,
+      loginHistory,
+      whatsappLogs,
+      academyCourses,
+      liveClasses,
+      enrollments,
+      assignments,
+      submissions,
+      messages,
+      academyNotes,
+      notifications,
+      attendanceLogs,
+      liveClassJoins
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error("Error saving database file:", err);
+  }
+}
+
+function loadDB() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const raw = fs.readFileSync(DB_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (data.subscribers) subscribers.splice(0, subscribers.length, ...data.subscribers);
+      if (data.academyUsers) academyUsers.splice(0, academyUsers.length, ...data.academyUsers);
+      if (data.academySubscriptions) academySubscriptions.splice(0, academySubscriptions.length, ...data.academySubscriptions);
+      if (data.upiPayments) upiPayments.splice(0, upiPayments.length, ...data.upiPayments);
+      if (data.otpCodes) otpCodes.splice(0, otpCodes.length, ...data.otpCodes);
+      if (data.loginHistory) loginHistory.splice(0, loginHistory.length, ...data.loginHistory);
+      if (data.whatsappLogs) whatsappLogs.splice(0, whatsappLogs.length, ...data.whatsappLogs);
+      if (data.academyCourses) academyCourses.splice(0, academyCourses.length, ...data.academyCourses);
+      if (data.liveClasses) liveClasses.splice(0, liveClasses.length, ...data.liveClasses);
+      if (data.enrollments) enrollments.splice(0, enrollments.length, ...data.enrollments);
+      if (data.assignments) assignments.splice(0, assignments.length, ...data.assignments);
+      if (data.submissions) submissions.splice(0, submissions.length, ...data.submissions);
+      if (data.messages) messages.splice(0, messages.length, ...data.messages);
+      if (data.academyNotes) academyNotes.splice(0, academyNotes.length, ...data.academyNotes);
+      if (data.notifications) notifications.splice(0, notifications.length, ...data.notifications);
+      if (data.attendanceLogs) attendanceLogs.splice(0, attendanceLogs.length, ...data.attendanceLogs);
+      if (data.liveClassJoins) liveClassJoins.splice(0, liveClassJoins.length, ...data.liveClassJoins);
+      console.log("Database file loaded successfully. Users count:", academyUsers.length);
+    } else {
+      console.log("No database file found. Seeding with default dataset.");
+      // Seed default admin and user password hashes
+      const adminUser = academyUsers.find(u => u.role === 'Admin');
+      if (adminUser) {
+        (adminUser as any).passwordHash = bcrypt.hashSync('admin123', 10);
+      }
+      const demoStudent = academyUsers.find(u => u.email === 'student@pearls.com');
+      if (demoStudent) {
+        (demoStudent as any).passwordHash = bcrypt.hashSync('student123', 10);
+      }
+      saveDB();
+    }
+  } catch (err) {
+    console.error("Error loading database file:", err);
+  }
+}
+
+// Automatically load database on startup
+loadDB();
+
 // 1. Get all live classes
 app.get("/api/live-classes", (req, res) => {
   res.json(liveClasses);
@@ -479,13 +571,14 @@ app.post("/api/live-classes", (req, res) => {
     duration: duration || '1 Hour',
     meetingLink,
     meetingCode: meetingCode || meetingLink.split('/').pop() || '',
-    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=800',
+    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800',
     notes: notes || [],
     recordings: [],
     status: status || 'scheduled'
   };
 
   liveClasses.unshift(newClass);
+  saveDB();
 
   // Send notifications to all enrolled students if published
   if (newClass.status !== 'draft') {
@@ -501,6 +594,7 @@ app.post("/api/live-classes", (req, res) => {
         });
       }
     });
+    saveDB();
   }
 
   res.json({ success: true, liveClass: newClass });
@@ -523,6 +617,7 @@ app.put("/api/live-classes/:id", (req, res) => {
   };
 
   liveClasses[index] = updatedClass;
+  saveDB();
 
   // If transitioned from draft to scheduled/published, send notifications
   if (oldStatus === 'draft' && updatedClass.status === 'scheduled') {
@@ -538,6 +633,7 @@ app.put("/api/live-classes/:id", (req, res) => {
         });
       }
     });
+    saveDB();
   }
 
   // Send recording uploaded notification if recording is added
@@ -554,6 +650,7 @@ app.put("/api/live-classes/:id", (req, res) => {
         });
       }
     });
+    saveDB();
   }
 
   res.json({ success: true, liveClass: updatedClass });
@@ -568,6 +665,7 @@ app.delete("/api/live-classes/:id", (req, res) => {
   }
 
   const deletedClass = liveClasses.splice(index, 1)[0];
+  saveDB();
   res.json({ success: true, deletedClass });
 });
 
@@ -776,7 +874,7 @@ app.post("/api/academy/assignments/submit", (req, res) => {
     courseTitle: assignment.courseTitle,
     userEmail,
     userName: userName || 'Student',
-    fileUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=800',
+    fileUrl: 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800',
     fileName: fileName || 'pattern_layout.pdf',
     submittedAt: new Date().toISOString().split('T')[0],
     marks: undefined,
@@ -1209,7 +1307,673 @@ app.post("/api/academy/admin/students/action", (req, res) => {
     user.batch = batchName;
   }
 
+  saveDB();
   res.json({ success: true, user });
+});
+
+// ==========================================
+// STUDENT AUTHENTICATION SYSTEM ENDPOINTS
+// ==========================================
+
+const JWT_SECRET = process.env.JWT_SECRET || 'pearls_secret_jwt_key_2026';
+
+// Middleware to authenticate student JWT
+function authenticateToken(req: any, res: any, next: any) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Authentication token required." });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+    if (err) {
+      return res.status(403).json({ error: "Invalid or expired session token. Please login again." });
+    }
+    req.user = decoded;
+    next();
+  });
+}
+
+// 1. Sign Up
+app.post("/api/auth/signup", (req, res) => {
+  const { 
+    name, email, phone, whatsapp, password, city, state, dob, gender, avatar, referralCode 
+  } = req.body;
+
+  if (!name || !email || !phone || !password) {
+    return res.status(400).json({ error: "Name, Email, Phone, and Password are required." });
+  }
+
+  // Check unique email & phone
+  const existingEmail = academyUsers.find(u => u.email === email);
+  if (existingEmail) {
+    return res.status(400).json({ error: "Email is already registered. Please login instead." });
+  }
+
+  const existingPhone = academyUsers.find(u => u.phone === phone);
+  if (existingPhone) {
+    return res.status(400).json({ error: "Phone number is already registered. Please login instead." });
+  }
+
+  // Hash password
+  const passwordHash = bcrypt.hashSync(password, 10);
+
+  // Generate OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpCodes.push({
+    id: `otp-${Math.floor(Math.random() * 10000)}`,
+    phone,
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    attempts: 0,
+    verified: false,
+    createdAt: Date.now()
+  });
+
+  // Log WhatsApp
+  const waMessage = `Welcome to Pearls Academy!\nYour verification OTP is ${otp}. Please enter this to activate your account.`;
+  whatsappLogs.unshift({
+    id: `wal-${Math.floor(Math.random() * 10000)}`,
+    phone,
+    messageType: 'OTP_CODE',
+    text: waMessage,
+    status: 'delivered',
+    timestamp: new Date().toLocaleString()
+  });
+
+  // Register unverified student
+  const studentCount = academyUsers.filter(u => u.role === 'Student').length;
+  const seq = String(studentCount + 1).padStart(4, '0');
+  const studentId = `PE-2026-${seq}`;
+
+  const newUser = {
+    id: `u-${Math.floor(1000 + Math.random() * 9000)}`,
+    email,
+    name,
+    role: 'Student' as const,
+    avatar: avatar || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
+    phone,
+    whatsapp: whatsapp || phone,
+    city: city || '',
+    state: state || '',
+    dob: dob || '',
+    gender: gender || '',
+    referralCode: referralCode || '',
+    passwordHash,
+    studentId,
+    active: false, // Inactive until verified
+    batch: 'All Batches'
+  };
+
+  academyUsers.push(newUser);
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "Registration successful. Verification OTP sent to your WhatsApp number.",
+    simulatedOtp: otp,
+    phone
+  });
+});
+
+// 2. Login
+app.post("/api/auth/login", (req, res) => {
+  const { emailOrPhone, password, rememberMe } = req.body;
+
+  if (!emailOrPhone || !password) {
+    return res.status(400).json({ error: "Email/Phone and Password are required." });
+  }
+
+  // Find user by email or phone
+  const user = academyUsers.find(u => u.email === emailOrPhone || u.phone === emailOrPhone);
+  if (!user || !(user as any).passwordHash) {
+    return res.status(400).json({ error: "Invalid credentials. Please try again." });
+  }
+
+  // Compare password
+  const passwordMatch = bcrypt.compareSync(password, (user as any).passwordHash);
+  if (!passwordMatch) {
+    return res.status(400).json({ error: "Invalid credentials. Please try again." });
+  }
+
+  // Check verification
+  if (user.role === 'Student' && !user.active) {
+    // Generate new verification OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    otpCodes.push({
+      id: `otp-${Math.floor(Math.random() * 10000)}`,
+      phone: user.phone,
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      attempts: 0,
+      verified: false,
+      createdAt: Date.now()
+    });
+
+    whatsappLogs.unshift({
+      id: `wal-${Math.floor(Math.random() * 10000)}`,
+      phone: user.phone,
+      messageType: 'OTP_CODE',
+      text: `Pearls Academy verification code: ${otp}`,
+      status: 'delivered',
+      timestamp: new Date().toLocaleString()
+    });
+
+    saveDB();
+
+    return res.status(403).json({
+      error: "ACCOUNT_NOT_VERIFIED",
+      message: "Your account is registered but not verified yet. An OTP has been sent to your WhatsApp.",
+      phone: user.phone,
+      simulatedOtp: otp
+    });
+  }
+
+  // Generate JWT token
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: rememberMe ? '30d' : '1d' }
+  );
+
+  // Log Login history
+  loginHistory.unshift({
+    id: `log-${Math.floor(Math.random() * 10000)}`,
+    phone: user.phone,
+    fullName: user.name,
+    timestamp: new Date().toLocaleString(),
+    status: 'Success',
+    ip: '192.168.1.' + Math.floor(2 + Math.random() * 254)
+  });
+  saveDB();
+
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      phone: user.phone,
+      whatsapp: user.whatsapp,
+      city: user.city,
+      state: user.state,
+      studentId: user.studentId,
+      active: user.active,
+      batch: user.batch
+    },
+    token
+  });
+});
+
+// 3. Verify OTP (Activated)
+app.post("/api/auth/verify-otp-auth", (req, res) => {
+  const { phone, otp } = req.body;
+
+  if (!phone || !otp) {
+    return res.status(400).json({ error: "Phone number and OTP code are required." });
+  }
+
+  const record = otpCodes.find(o => o.phone === phone && o.otp === otp && !o.verified);
+  if (!record) {
+    return res.status(400).json({ error: "No active verification request found or incorrect OTP." });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    return res.status(400).json({ error: "OTP expired. Please request a new code." });
+  }
+
+  record.verified = true;
+
+  const user = academyUsers.find(u => u.phone === phone);
+  if (user) {
+    user.active = true;
+    
+    // Add Welcome notification
+    notifications.unshift({
+      id: `nt-${Math.floor(Math.random() * 10000)}`,
+      userEmail: user.email,
+      title: 'Welcome to Pearls Academy!',
+      text: `Hello ${user.name}! Your account is now fully verified and activated. Browse our premium courses to start designing!`,
+      date: 'Just now',
+      read: false
+    });
+  }
+
+  saveDB();
+
+  // Generate JWT token immediately so student enters the app
+  const token = user ? jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  ) : null;
+
+  res.json({
+    success: true,
+    message: "OTP verified successfully. Your account is activated!",
+    user,
+    token
+  });
+});
+
+// 4. Resend OTP
+app.post("/api/auth/resend-otp", (req, res) => {
+  const { phone } = req.body;
+  if (!phone) {
+    return res.status(400).json({ error: "Phone number is required." });
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpCodes.push({
+    id: `otp-${Math.floor(Math.random() * 10000)}`,
+    phone,
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    attempts: 0,
+    verified: false,
+    createdAt: Date.now()
+  });
+
+  whatsappLogs.unshift({
+    id: `wal-${Math.floor(Math.random() * 10000)}`,
+    phone,
+    messageType: 'OTP_CODE',
+    text: `Pearls Academy verification code: ${otp}`,
+    status: 'delivered',
+    timestamp: new Date().toLocaleString()
+  });
+
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "A new OTP code has been sent to your WhatsApp number.",
+    simulatedOtp: otp
+  });
+});
+
+// 5. Logout
+app.post("/api/auth/logout", (req, res) => {
+  res.json({ success: true, message: "Logged out successfully." });
+});
+
+// 6. Continue with Google
+app.post("/api/auth/google", (req, res) => {
+  const { email, name, avatar } = req.body;
+
+  if (!email || !name) {
+    return res.status(400).json({ error: "Google email and name are required." });
+  }
+
+  let user = academyUsers.find(u => u.email === email);
+  if (!user) {
+    // Automatically create a verified student account
+    const studentCount = academyUsers.filter(u => u.role === 'Student').length;
+    const seq = String(studentCount + 1).padStart(4, '0');
+    const studentId = `PE-2026-${seq}`;
+
+    user = {
+      id: `u-${Math.floor(1000 + Math.random() * 9000)}`,
+      email,
+      name,
+      role: 'Student',
+      avatar: avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+      phone: 'G-' + Math.floor(1000000000 + Math.random() * 9000000000).toString(), // mock phone
+      whatsapp: '',
+      city: '',
+      state: '',
+      studentId,
+      active: true, // Google accounts are auto-active
+      batch: 'All Batches'
+    };
+    academyUsers.push(user);
+
+    notifications.unshift({
+      id: `nt-${Math.floor(Math.random() * 10000)}`,
+      userEmail: email,
+      title: 'Account Created via Google',
+      text: `Welcome to Pearls Academy! Your account was registered successfully via Google Sign-In.`,
+      date: 'Just now',
+      read: false
+    });
+    saveDB();
+  }
+
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+
+  res.json({
+    success: true,
+    user,
+    token
+  });
+});
+
+// 7. Forgot Password (OTP request)
+app.post("/api/auth/forgot-password", (req, res) => {
+  const { emailOrPhone } = req.body;
+  if (!emailOrPhone) {
+    return res.status(400).json({ error: "Email or Phone number is required." });
+  }
+
+  const user = academyUsers.find(u => u.email === emailOrPhone || u.phone === emailOrPhone);
+  if (!user) {
+    return res.status(404).json({ error: "No student account found with this email or phone number." });
+  }
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpCodes.push({
+    id: `otp-${Math.floor(Math.random() * 10000)}`,
+    phone: user.phone,
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    attempts: 0,
+    verified: false,
+    createdAt: Date.now()
+  });
+
+  whatsappLogs.unshift({
+    id: `wal-${Math.floor(Math.random() * 10000)}`,
+    phone: user.phone,
+    messageType: 'OTP_CODE',
+    text: `Your Pearls Academy password recovery OTP is ${otp}. Do not share this with anyone.`,
+    status: 'delivered',
+    timestamp: new Date().toLocaleString()
+  });
+
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "A password recovery OTP has been sent to your WhatsApp number.",
+    phone: user.phone,
+    simulatedOtp: otp
+  });
+});
+
+// 8. Reset Password (with verified OTP)
+app.post("/api/auth/reset-password", (req, res) => {
+  const { phone, otp, newPassword } = req.body;
+
+  if (!phone || !otp || !newPassword) {
+    return res.status(400).json({ error: "Phone, OTP, and New Password are required." });
+  }
+
+  const record = otpCodes.find(o => o.phone === phone && o.otp === otp && !o.verified);
+  if (!record) {
+    return res.status(400).json({ error: "Invalid OTP or request." });
+  }
+
+  if (Date.now() > record.expiresAt) {
+    return res.status(400).json({ error: "OTP expired. Please try again." });
+  }
+
+  record.verified = true;
+
+  const user = academyUsers.find(u => u.phone === phone);
+  if (user) {
+    (user as any).passwordHash = bcrypt.hashSync(newPassword, 10);
+    
+    notifications.unshift({
+      id: `nt-${Math.floor(Math.random() * 10000)}`,
+      userEmail: user.email,
+      title: 'Password Updated',
+      text: `Your password has been successfully updated. You can now log in with your new credentials.`,
+      date: 'Just now',
+      read: false
+    });
+  }
+
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "Your password has been updated successfully! Please log in now."
+  });
+});
+
+// 9. Get Student Profile (Protected)
+app.get("/api/student/profile", authenticateToken, (req, res) => {
+  const user = academyUsers.find(u => u.id === (req as any).user.id);
+  if (!user) {
+    return res.status(404).json({ error: "Student profile not found." });
+  }
+
+  const studentEnrollments = enrollments.filter(e => e.userEmail === user.email);
+  const studentSubs = academySubscriptions.filter(s => s.userId === user.id);
+  const studentPayments = upiPayments.filter(p => p.phone === user.phone || p.fullName.toLowerCase() === user.name.toLowerCase());
+  const studentAttendance = attendanceLogs.filter(a => a.userEmail === user.email);
+
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      phone: user.phone,
+      whatsapp: user.whatsapp,
+      city: user.city,
+      state: user.state,
+      dob: (user as any).dob || '',
+      gender: (user as any).gender || '',
+      referralCode: (user as any).referralCode || '',
+      studentId: user.studentId,
+      active: user.active,
+      batch: user.batch
+    },
+    enrollments: studentEnrollments,
+    subscriptions: studentSubs,
+    payments: studentPayments,
+    attendance: studentAttendance
+  });
+});
+
+// 10. Update Profile (Protected)
+app.put("/api/student/profile", authenticateToken, (req, res) => {
+  const user = academyUsers.find(u => u.id === (req as any).user.id);
+  if (!user) {
+    return res.status(404).json({ error: "Student profile not found." });
+  }
+
+  const { name, email, phone, whatsapp, city, state, dob, gender, avatar } = req.body;
+
+  if (name) user.name = name;
+  if (email) user.email = email;
+  if (phone) user.phone = phone;
+  if (whatsapp) user.whatsapp = whatsapp;
+  if (city) user.city = city;
+  if (state) user.state = state;
+  if (dob) (user as any).dob = dob;
+  if (gender) (user as any).gender = gender;
+  if (avatar) user.avatar = avatar;
+
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "Profile updated successfully.",
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      phone: user.phone,
+      whatsapp: user.whatsapp,
+      city: user.city,
+      state: user.state,
+      dob: (user as any).dob || '',
+      gender: (user as any).gender || '',
+      referralCode: (user as any).referralCode || '',
+      studentId: user.studentId,
+      active: user.active,
+      batch: user.batch
+    }
+  });
+});
+
+// 11. Change Password (Protected)
+app.put("/api/student/change-password", authenticateToken, (req, res) => {
+  const user = academyUsers.find(u => u.id === (req as any).user.id);
+  if (!user) {
+    return res.status(404).json({ error: "Student profile not found." });
+  }
+
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "Current password and new password are required." });
+  }
+
+  if (!(user as any).passwordHash) {
+    return res.status(400).json({ error: "No direct password set. Please use Forgot Password to initialize one." });
+  }
+
+  const match = bcrypt.compareSync(currentPassword, (user as any).passwordHash);
+  if (!match) {
+    return res.status(400).json({ error: "Incorrect current password." });
+  }
+
+  (user as any).passwordHash = bcrypt.hashSync(newPassword, 10);
+  saveDB();
+
+  res.json({
+    success: true,
+    message: "Password changed successfully."
+  });
+});
+
+// 12. Student Dashboard stats (Protected)
+app.get("/api/student/dashboard", authenticateToken, (req, res) => {
+  const user = academyUsers.find(u => u.id === (req as any).user.id);
+  if (!user) {
+    return res.status(404).json({ error: "Student profile not found." });
+  }
+
+  const studentEnrollments = enrollments.filter(e => e.userEmail === user.email);
+  const studentSubs = academySubscriptions.filter(s => s.userId === user.id);
+  const studentNotes = academyNotes.filter(n => studentEnrollments.some(e => e.courseTitle === n.courseTitle));
+  const studentAssignments = assignments.filter(a => studentEnrollments.some(e => e.courseId === a.courseId));
+  const studentSubmissions = submissions.filter(s => s.userEmail === user.email);
+  const studentNotifications = notifications.filter(n => n.userEmail === user.email || n.userEmail === 'all');
+
+  res.json({
+    success: true,
+    stats: {
+      enrolledCourses: studentEnrollments.length,
+      upcomingClasses: liveClasses.filter(c => c.status === 'scheduled').length,
+      assignmentsDue: studentAssignments.length - studentSubmissions.length,
+      certificatesEarned: studentEnrollments.filter(e => e.hasCertificate).length
+    },
+    enrollments: studentEnrollments,
+    subscriptions: studentSubs,
+    notes: studentNotes,
+    assignments: studentAssignments,
+    submissions: studentSubmissions,
+    notifications: studentNotifications
+  });
+});
+
+// ==========================================
+// ADMIN STUDENT MANAGEMENT API
+// ==========================================
+
+// Get All Students
+app.get("/api/admin/students", (req, res) => {
+  const students = academyUsers.filter(u => u.role === 'Student').map(u => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    role: u.role,
+    avatar: u.avatar,
+    phone: u.phone,
+    whatsapp: u.whatsapp,
+    city: u.city,
+    state: u.state,
+    dob: (u as any).dob || '',
+    gender: (u as any).gender || '',
+    studentId: u.studentId,
+    active: u.active,
+    batch: u.batch
+  }));
+  res.json({ success: true, students });
+});
+
+// Reset Student Password (Admin)
+app.post("/api/admin/students/:id/reset-password", (req, res) => {
+  const { id } = req.params;
+  const { newPassword } = req.body;
+
+  const user = academyUsers.find(u => u.id === id);
+  if (!user) {
+    return res.status(404).json({ error: "Student not found." });
+  }
+
+  (user as any).passwordHash = bcrypt.hashSync(newPassword || 'student123', 10);
+  saveDB();
+
+  res.json({ success: true, message: `Password reset successfully for ${user.name}.` });
+});
+
+// Delete Student Account
+app.delete("/api/admin/students/:id", (req, res) => {
+  const { id } = req.params;
+  const index = academyUsers.findIndex(u => u.id === id);
+
+  if (index === -1) {
+    return res.status(404).json({ error: "Student not found." });
+  }
+
+  const name = academyUsers[index].name;
+  academyUsers.splice(index, 1);
+  saveDB();
+
+  res.json({ success: true, message: `Student account of ${name} has been permanently deleted.` });
+});
+
+// Get Student Detail Logs
+app.get("/api/admin/students/:id/detail", (req, res) => {
+  const { id } = req.params;
+  const user = academyUsers.find(u => u.id === id);
+  if (!user) {
+    return res.status(404).json({ error: "Student not found." });
+  }
+
+  const studentEnrollments = enrollments.filter(e => e.userEmail === user.email);
+  const studentSubs = academySubscriptions.filter(s => s.userId === user.id);
+  const studentPayments = upiPayments.filter(p => p.phone === user.phone || p.fullName.toLowerCase() === user.name.toLowerCase());
+  const studentHistory = loginHistory.filter(h => h.phone === user.phone || h.fullName.toLowerCase() === user.name.toLowerCase());
+
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      phone: user.phone,
+      whatsapp: user.whatsapp,
+      city: user.city,
+      state: user.state,
+      dob: (user as any).dob || '',
+      gender: (user as any).gender || '',
+      studentId: user.studentId,
+      active: user.active,
+      batch: user.batch
+    },
+    enrollments: studentEnrollments,
+    subscriptions: studentSubs,
+    payments: studentPayments,
+    history: studentHistory
+  });
 });
 
 // API: Health check

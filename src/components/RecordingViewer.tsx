@@ -41,7 +41,7 @@ export default function RecordingViewer({ topic, courseTitle, recordings = [], n
                 controls
                 autoPlay
                 className="w-full max-h-[85%] object-contain rounded-2xl"
-                poster="https://images.unsplash.com/photo-1544816155-12df9643f363?w=1200"
+                poster="https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=1200"
               />
               <div className="mt-4 text-left w-full px-2">
                 <span className="text-[10px] text-[#D4AF37] font-mono tracking-widest uppercase font-bold block mb-1">

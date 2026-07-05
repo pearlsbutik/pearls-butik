@@ -122,7 +122,7 @@ export default function LiveClassCard({
       {/* Thumbnail Header */}
       <div className="h-44 w-full relative overflow-hidden bg-stone-100">
         <img 
-          src={session.thumbnail || 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=800'} 
+          src={session.thumbnail || 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800'} 
           alt={session.topic}
           className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-500"
           referrerPolicy="no-referrer"

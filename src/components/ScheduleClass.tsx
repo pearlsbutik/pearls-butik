@@ -26,8 +26,8 @@ export default function ScheduleClass({ courses, onSubmit, onCancel }: ScheduleC
   const [endTime, setEndTime] = useState('12:00 PM');
   const [duration, setDuration] = useState('1 Hour');
   
-  const [googleMeetLink, setGoogleMeetLink] = useState('https://meet.google.com/abc-defg-hij');
-  const [thumbnail, setThumbnail] = useState('https://images.unsplash.com/photo-1544816155-12df9643f363?w=800');
+  const [googleMeetLink, setGoogleMeetLink] = useState('');
+  const [thumbnail, setThumbnail] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [noteUrl, setNoteUrl] = useState('#');
   const [notes, setNotes] = useState<{ title: string; downloadUrl: string; size: string }[]>([]);

@@ -7,7 +7,7 @@ import {
   Clock, ArrowLeft, AlertCircle, Trash2, Plus, Edit, ShieldAlert, 
   Volume2, VolumeX, Maximize2, Minimize2, Monitor, PenTool, Eraser, 
   RefreshCw, Play, CheckCircle2, Info, Star, MessageSquare, Bell, CreditCard,
-  Search, ShieldCheck, AlertTriangle
+  Search, ShieldCheck, AlertTriangle, User, Lock, Unlock, Smartphone, Mail, MapPin, UserPlus
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import LiveClasses from './LiveClasses';
@@ -228,6 +228,34 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const [adminStudentSearch, setAdminStudentSearch] = useState('');
   const [adminStudentFilter, setAdminStudentFilter] = useState<'all' | 'active' | 'suspended'>('all');
 
+  // Student Authentication system states
+  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'verify' | 'forgot' | 'reset'>('login');
+  const [signupForm, setSignupForm] = useState({
+    name: '', email: '', phone: '', whatsapp: '', password: '', city: '', state: '', dob: '', gender: '', avatar: '', referralCode: ''
+  });
+  const [loginForm, setLoginForm] = useState({ emailOrPhone: '', password: '', rememberMe: true });
+  const [verifyForm, setVerifyForm] = useState({ phone: '', otp: '' });
+  const [forgotForm, setForgotForm] = useState({ emailOrPhone: '' });
+  const [resetForm, setResetForm] = useState({ phone: '', otp: '', newPassword: '' });
+  const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+  const [simulatedAuthOtp, setSimulatedAuthOtp] = useState<string | null>(null);
+
+  // Profile Edit modal/fields states
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: '', email: '', phone: '', whatsapp: '', city: '', state: '', dob: '', gender: '', avatar: ''
+  });
+  const [changePasswordForm, setChangePasswordForm] = useState({ currentPassword: '', newPassword: '' });
+  const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
+  const [profileError, setProfileError] = useState('');
+
+  // Admin student detail management states
+  const [selectedStudentDetail, setSelectedStudentDetail] = useState<any | null>(null);
+  const [showStudentDetailModal, setShowStudentDetailModal] = useState(false);
+  const [adminResetPassField, setAdminResetPassField] = useState('');
+  const [loadingStudentDetail, setLoadingStudentDetail] = useState(false);
+
   // Timers for OTP flows
   useEffect(() => {
     let interval: any = null;
@@ -266,12 +294,12 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   }, [loginOtpTimer]);
 
   // Fetch full state from backend
-  const fetchState = async (email: string) => {
+  const fetchState = async (email?: string) => {
     setIsLoading(true);
     try {
-      const data = await apiFetch(
-  `/api/academy/state?email=${encodeURIComponent(email)}`
-);
+      const token = localStorage.getItem('token');
+      const url = token ? '/api/academy/state' : `/api/academy/state?email=${encodeURIComponent(email || selectedRoleEmail || 'student@pearls.com')}`;
+      const data = await apiFetch(url);
       if (data) {
         setCurrentUser(data.user);
         setCourses(data.courses);
@@ -305,7 +333,12 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   };
 
   useEffect(() => {
-    fetchState(selectedRoleEmail);
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchState();
+    } else {
+      fetchState(selectedRoleEmail);
+    }
   }, [selectedRoleEmail]);
 
   // Admin passcode verification loop
@@ -620,6 +653,342 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       if (res.ok) {
         showToast("Student database updated successfully.");
         await fetchState(selectedRoleEmail);
+        if (selectedStudentDetail && selectedStudentDetail.user.id === userId) {
+          // Refresh details modal
+          await handleLoadStudentDetail(userId);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 1. Student Auth: Sign Up
+  const handleStudentSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+    setSimulatedAuthOtp(null);
+
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(signupForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Failed to complete sign up. Please try again.");
+        return;
+      }
+      setAuthSuccessMsg(data.message);
+      setVerifyForm({ ...verifyForm, phone: signupForm.phone });
+      setSimulatedAuthOtp(data.simulatedOtp);
+      setAuthMode('verify');
+      showToast("Verification code dispatched!");
+    } catch (err) {
+      console.error(err);
+      setAuthError("Failed to connect to the authentication server.");
+    }
+  };
+
+  // 2. Student Auth: Login
+  const handleStudentLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === "ACCOUNT_NOT_VERIFIED") {
+          setAuthError(data.message);
+          setVerifyForm({ ...verifyForm, phone: data.phone });
+          setSimulatedAuthOtp(data.simulatedOtp);
+          setAuthMode('verify');
+          showToast("OTP code sent for verification!");
+          return;
+        }
+        setAuthError(data.error || "Incorrect login credentials.");
+        return;
+      }
+
+      localStorage.setItem('token', data.token);
+      showToast(`Welcome back, ${data.user.name}!`);
+      await fetchState();
+    } catch (err) {
+      console.error(err);
+      setAuthError("Failed to authenticate.");
+    }
+  };
+
+  // 3. Student Auth: Verify OTP
+  const handleStudentVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/auth/verify-otp-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(verifyForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Invalid OTP entered.");
+        return;
+      }
+
+      localStorage.setItem('token', data.token);
+      setSimulatedAuthOtp(null);
+      showToast("Account successfully activated!");
+      await fetchState();
+    } catch (err) {
+      console.error(err);
+      setAuthError("Verification failed.");
+    }
+  };
+
+  // 4. Student Auth: Forgot Password
+  const handleStudentForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(forgotForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "No account found.");
+        return;
+      }
+
+      setAuthSuccessMsg(data.message);
+      setResetForm({ ...resetForm, phone: data.phone });
+      setSimulatedAuthOtp(data.simulatedOtp);
+      setAuthMode('reset');
+      showToast("Recovery OTP code sent!");
+    } catch (err) {
+      console.error(err);
+      setAuthError("Forgot password request failed.");
+    }
+  };
+
+  // 5. Student Auth: Reset Password
+  const handleStudentReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resetForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Password reset failed.");
+        return;
+      }
+
+      setAuthSuccessMsg("Password reset completed successfully. You can now login!");
+      setSimulatedAuthOtp(null);
+      setAuthMode('login');
+      showToast("Password updated!");
+    } catch (err) {
+      console.error(err);
+      setAuthError("Reset password failed.");
+    }
+  };
+
+  // 6. Student Auth: Logout
+  const handleStudentLogout = async () => {
+    localStorage.removeItem('token');
+    setCurrentUser(null);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {}
+    showToast("Logged out successfully.");
+    await fetchState(selectedRoleEmail);
+  };
+
+  // 7. Student Auth: Continue with Google (Simulated Popup Flow)
+  const handleGoogleLogin = async () => {
+    setAuthError('');
+    try {
+      const names = ["Ananya Roy", "Sneha Patil", "Divya Sharma", "Pooja Hegde"];
+      const randomIdx = Math.floor(Math.random() * names.length);
+      const name = names[randomIdx];
+      const email = `${name.toLowerCase().replace(' ', '')}@gmail.com`;
+      const avatar = `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 999999)}?w=120`;
+
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, avatar })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        localStorage.setItem('token', data.token);
+        showToast(`Google authenticated: Welcome ${data.user.name}!`);
+        await fetchState();
+      } else {
+        setAuthError("Google Sign-In failed.");
+      }
+    } catch (err) {
+      console.error(err);
+      setAuthError("Failed to initiate Google sign in.");
+    }
+  };
+
+  // 8. Student Auth: Resend Respective OTP
+  const handleAuthResendOtp = async () => {
+    const phone = authMode === 'verify' ? verifyForm.phone : resetForm.phone;
+    if (!phone) return;
+
+    try {
+      const res = await fetch('/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSimulatedAuthOtp(data.simulatedOtp);
+        showToast("A fresh OTP code has been dispatched!");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 9. Profile Edit: Submit
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccessMsg('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/student/profile', {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(profileForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setProfileError(data.error || "Profile update failed.");
+        return;
+      }
+
+      setProfileSuccessMsg(data.message);
+      showToast("Profile updated successfully!");
+      setCurrentUser(data.user);
+      setShowProfileEdit(false);
+    } catch (err) {
+      console.error(err);
+      setProfileError("Network issue updating profile.");
+    }
+  };
+
+  // 10. Profile Edit: Password change
+  const handleProfilePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccessMsg('');
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/student/change-password', {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(changePasswordForm)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setProfileError(data.error || "Failed to change password.");
+        return;
+      }
+
+      setProfileSuccessMsg(data.message);
+      showToast("Password updated successfully!");
+      setChangePasswordForm({ currentPassword: '', newPassword: '' });
+    } catch (err) {
+      console.error(err);
+      setProfileError("Network issue changing password.");
+    }
+  };
+
+  // 11. Admin Manage: Load student detailed history log
+  const handleLoadStudentDetail = async (userId: string) => {
+    setLoadingStudentDetail(true);
+    try {
+      const res = await fetch(`/api/admin/students/${userId}/detail`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedStudentDetail(data);
+        setShowStudentDetailModal(true);
+      } else {
+        showToast("Failed to load student details.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingStudentDetail(false);
+    }
+  };
+
+  // 12. Admin Manage: Reset Password
+  const handleAdminResetPassword = async () => {
+    if (!selectedStudentDetail) return;
+    try {
+      const res = await fetch(`/api/admin/students/${selectedStudentDetail.user.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: adminResetPassField || 'student123' })
+      });
+      if (res.ok) {
+        showToast(`Password updated for ${selectedStudentDetail.user.name}`);
+        setAdminResetPassField('');
+        await handleLoadStudentDetail(selectedStudentDetail.user.id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // 13. Admin Manage: Delete student account
+  const handleAdminDeleteStudent = async () => {
+    if (!selectedStudentDetail) return;
+    const confirmDel = window.confirm(`Are you absolutely sure you want to permanently delete the student account of ${selectedStudentDetail.user.name}? This action is irreversible.`);
+    if (!confirmDel) return;
+
+    try {
+      const res = await fetch(`/api/admin/students/${selectedStudentDetail.user.id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        showToast("Student account permanently deleted.");
+        setShowStudentDetailModal(false);
+        setSelectedStudentDetail(null);
+        await fetchState(selectedRoleEmail);
       }
     } catch (err) {
       console.error(err);
@@ -862,31 +1231,71 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
           </div>
         </div>
 
-        {/* Dynamic Multi-Role Testing Selector & Live WhatsApp Login */}
+        {/* Dynamic Multi-Role Student Authentication & Profile */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setLoginStep(1);
-              setLoginPhone('');
-              setLoginOtpCode('');
-              setLoginError('');
-              setLoginSimulatedOtp(null);
-              setShowLoginModal(true);
-            }}
-            className="bg-green-600 hover:bg-green-700 text-white font-mono text-[10px] uppercase tracking-wider font-bold py-1.5 px-3.5 rounded-full flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-          >
-            <MessageSquare className="w-3.5 h-3.5 animate-pulse" />
-            <span>Student Login via WhatsApp</span>
-          </button>
+          {currentUser && localStorage.getItem('token') ? (
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 p-1.5 rounded-full pr-4 text-xs text-stone-300">
+                <img src={currentUser.avatar} className="w-6 h-6 rounded-full object-cover border border-[#D4AF37]/40" />
+                <div className="flex flex-col">
+                  <span className="font-mono font-bold leading-none">{currentUser.name}</span>
+                  <span className="text-[8px] font-mono text-[#D4AF37] uppercase tracking-wider mt-0.5">{currentUser.role} • {currentUser.studentId || 'N/A'}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setProfileForm({
+                    name: currentUser.name || '',
+                    email: currentUser.email || '',
+                    phone: currentUser.phone || '',
+                    whatsapp: currentUser.whatsapp || '',
+                    city: currentUser.city || '',
+                    state: currentUser.state || '',
+                    dob: (currentUser as any).dob || '',
+                    gender: (currentUser as any).gender || '',
+                    avatar: currentUser.avatar || ''
+                  });
+                  setProfileError('');
+                  setProfileSuccessMsg('');
+                  setShowProfileEdit(true);
+                }}
+                className="bg-stone-900 border border-stone-800 hover:border-stone-700 hover:text-[#D4AF37] p-2 rounded-full text-stone-400 transition-all cursor-pointer"
+                title="Edit Profile"
+              >
+                <User className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleStudentLogout}
+                className="bg-red-950/40 hover:bg-red-900/60 border border-red-800/40 hover:border-red-600 text-red-200 font-mono text-[9px] uppercase tracking-wider font-bold py-1.5 px-3.5 rounded-full transition-all cursor-pointer"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError('');
+                setAuthSuccessMsg('');
+              }}
+              className="bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] hover:brightness-110 text-black font-mono text-[10px] uppercase tracking-wider font-bold py-1.5 px-4 rounded-full transition-all shadow-sm cursor-pointer"
+            >
+              Sign In / Register
+            </button>
+          )}
 
           <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 p-1 rounded-full text-xs">
-            <span className="hidden xl:inline text-[9px] text-stone-500 font-mono uppercase tracking-wider px-3 font-bold">Simulator Roles:</span>
-            {allUsers.map((roleUser) => (
+            <span className="hidden xl:inline text-[9px] text-stone-500 font-mono uppercase tracking-wider px-3 font-bold">Simulator:</span>
+            {allUsers.slice(0, 3).map((roleUser) => (
               <button
                 key={roleUser.id}
-                onClick={() => handleRoleSwap(roleUser.email)}
+                onClick={async () => {
+                  localStorage.removeItem('token'); // clear active JWT
+                  await handleRoleSwap(roleUser.email);
+                  showToast(`Swapped to simulation: ${roleUser.role}`);
+                }}
                 className={`px-3 py-1.5 rounded-full font-mono text-[10px] uppercase tracking-wider transition-all cursor-pointer font-semibold ${
-                  selectedRoleEmail === roleUser.email
+                  selectedRoleEmail === roleUser.email && !localStorage.getItem('token')
                     ? 'bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black shadow-sm'
                     : 'text-stone-400 hover:text-white'
                 }`}
@@ -903,6 +1312,496 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-3">
           <RefreshCw className="w-8 h-8 text-[#D4AF37] animate-spin" />
           <p className="text-xs font-mono tracking-widest text-stone-500 uppercase">Synchronizing Institute Records...</p>
+        </div>
+      ) : !localStorage.getItem('token') && (!currentUser || currentUser.role === 'Student') ? (
+        <div className="flex-grow flex items-center justify-center p-4 md:p-12 overflow-y-auto">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-xl bg-white border border-[#D4AF37]/30 rounded-[32px] p-6 md:p-10 shadow-xl space-y-8 relative overflow-hidden my-auto"
+          >
+            {/* Background Decorative Gradient */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#D4AF37] via-[#AA7C11] to-[#D4AF37]" />
+            <div className="absolute -right-24 -top-24 w-48 h-48 rounded-full bg-[#D4AF37]/5 blur-3xl pointer-events-none" />
+            <div className="absolute -left-24 -bottom-24 w-48 h-48 rounded-full bg-[#D4AF37]/5 blur-3xl pointer-events-none" />
+
+            {/* Header */}
+            <div className="text-center space-y-2">
+              <div className="mx-auto w-12 h-12 rounded-full bg-[#111111] flex items-center justify-center border border-[#D4AF37]/45 text-[#D4AF37]">
+                <GraduationCap className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="font-serif text-2xl font-extrabold text-stone-900 tracking-wide">
+                  {authMode === 'login' && "Student Login"}
+                  {authMode === 'signup' && "Create Account"}
+                  {authMode === 'verify' && "Verify Your Identity"}
+                  {authMode === 'forgot' && "Recover Password"}
+                  {authMode === 'reset' && "Set New Password"}
+                </h2>
+                <p className="text-xs text-stone-500 mt-1">
+                  {authMode === 'login' && "Enter your credentials to access your courses & virtual academy dashboard."}
+                  {authMode === 'signup' && "Register to enroll in live fashion design & custom tailoring modules."}
+                  {authMode === 'verify' && "Enter the 6-digit WhatsApp OTP sent to verify your mobile."}
+                  {authMode === 'forgot' && "Confirm your account identifier to receive an OTP code."}
+                  {authMode === 'reset' && "Complete verification and secure your tailoring profile."}
+                </p>
+              </div>
+            </div>
+
+            {/* Alerts & Simulated WhatsApp OTP Box */}
+            {authError && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl flex items-start gap-3 text-red-700 text-xs font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            {authSuccessMsg && (
+              <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-xl flex items-start gap-3 text-green-700 text-xs font-medium">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authSuccessMsg}</span>
+              </div>
+            )}
+
+            {simulatedAuthOtp && (
+              <div className="bg-amber-50 border border-amber-300 p-4 rounded-2xl space-y-2.5 animate-pulse">
+                <div className="flex items-center gap-2 text-amber-800 text-xs font-bold font-mono uppercase tracking-wider">
+                  <MessageSquare className="w-4 h-4 text-amber-600" />
+                  <span>Simulated WhatsApp Push Notification</span>
+                </div>
+                <p className="text-stone-700 text-xs">
+                  Your Pearls Academy OTP verification code is: <strong className="bg-[#111111] text-amber-300 px-2.5 py-1 rounded font-mono text-sm border border-stone-800 tracking-widest">{simulatedAuthOtp}</strong>
+                </p>
+                <p className="text-[10px] text-stone-500 font-light italic">In production, this OTP is dispatched via WhatsApp Business API.</p>
+              </div>
+            )}
+
+            {/* TABS (For Login/Signup Mode Switching) */}
+            {(authMode === 'login' || authMode === 'signup') && (
+              <div className="flex gap-2 bg-stone-100 p-1.5 rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccessMsg(''); }}
+                  className={`flex-1 py-3 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all ${
+                    authMode === 'login' ? 'bg-[#111111] text-[#D4AF37] shadow-md' : 'text-stone-500 hover:text-stone-800'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccessMsg(''); }}
+                  className={`flex-1 py-3 text-xs font-mono font-bold tracking-wider uppercase rounded-xl transition-all ${
+                    authMode === 'signup' ? 'bg-[#111111] text-[#D4AF37] shadow-md' : 'text-stone-500 hover:text-stone-800'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+                  Register
+                </button>
+              </div>
+            )}
+
+            {/* 1. LOGIN FORM */}
+            {authMode === 'login' && (
+              <form onSubmit={handleStudentLogin} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Email or Phone Number</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="student@pearls.com or 9876543210"
+                      value={loginForm.emailOrPhone}
+                      onChange={(e) => setLoginForm({ ...loginForm, emailOrPhone: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Password</label>
+                    <button
+                      type="button"
+                      onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccessMsg(''); }}
+                      className="text-[10px] font-mono tracking-wider text-[#AA7C11] uppercase hover:underline"
+                    >
+                      Forgot?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={loginForm.password}
+                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-600 select-none">
+                    <input
+                      type="checkbox"
+                      checked={loginForm.rememberMe}
+                      onChange={(e) => setLoginForm({ ...loginForm, rememberMe: e.target.checked })}
+                      className="rounded border-stone-300 text-[#AA7C11] focus:ring-[#AA7C11]"
+                    />
+                    Keep me logged in (30 Days)
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 mt-4"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Authenticate & Enter Portal</span>
+                </button>
+              </form>
+            )}
+
+            {/* 2. SIGN UP FORM */}
+            {authMode === 'signup' && (
+              <form onSubmit={handleStudentSignup} className="space-y-4 max-h-[50vh] overflow-y-auto pr-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Full Name *</label>
+                    <div className="relative">
+                      <User className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ananya Roy"
+                        value={signupForm.name}
+                        onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                        className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Email Address *</label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="ananya@example.com"
+                        value={signupForm.email}
+                        onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
+                        className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Mobile Number (OTP verification) *</label>
+                    <div className="relative">
+                      <Smartphone className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                      <input
+                        type="tel"
+                        required
+                        placeholder="9876543210"
+                        value={signupForm.phone}
+                        onChange={(e) => setSignupForm({ ...signupForm, phone: e.target.value })}
+                        className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">WhatsApp Number</label>
+                    <div className="relative">
+                      <MessageSquare className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                      <input
+                        type="tel"
+                        placeholder="Same as mobile number"
+                        value={signupForm.whatsapp}
+                        onChange={(e) => setSignupForm({ ...signupForm, whatsapp: e.target.value })}
+                        className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Secure Password *</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                    <input
+                      type="password"
+                      required
+                      placeholder="Minimum 6 characters"
+                      value={signupForm.password}
+                      onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">City</label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                      <input
+                        type="text"
+                        placeholder="Mumbai"
+                        value={signupForm.city}
+                        onChange={(e) => setSignupForm({ ...signupForm, city: e.target.value })}
+                        className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">State</label>
+                    <input
+                      type="text"
+                      placeholder="Maharashtra"
+                      value={signupForm.state}
+                      onChange={(e) => setSignupForm({ ...signupForm, state: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 px-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Date of Birth</label>
+                    <input
+                      type="date"
+                      value={signupForm.dob}
+                      onChange={(e) => setSignupForm({ ...signupForm, dob: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 px-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Gender</label>
+                    <select
+                      value={signupForm.gender}
+                      onChange={(e) => setSignupForm({ ...signupForm, gender: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 px-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    >
+                      <option value="">Select Gender</option>
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Avatar select grid */}
+                <div className="space-y-2 pt-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Select Profile Avatar</label>
+                  <div className="grid grid-cols-4 gap-3">
+                    {[
+                      { name: 'Ananya', url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
+                      { name: 'Sneha', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120' },
+                      { name: 'Divya', url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120' },
+                      { name: 'Pooja', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120' }
+                    ].map((av) => (
+                      <button
+                        key={av.name}
+                        type="button"
+                        onClick={() => setSignupForm({ ...signupForm, avatar: av.url })}
+                        className={`p-1 rounded-2xl border-2 transition-all ${
+                          signupForm.avatar === av.url ? 'border-[#D4AF37] bg-amber-50' : 'border-stone-100 hover:border-stone-300'
+                        }`}
+                      >
+                        <img src={av.url} className="w-full aspect-square rounded-xl object-cover" />
+                        <span className="text-[9px] font-mono mt-1 block text-stone-500">{av.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Referral / Coupon Code</label>
+                  <input
+                    type="text"
+                    placeholder="PEARLS_COUPON"
+                    value={signupForm.referralCode}
+                    onChange={(e) => setSignupForm({ ...signupForm, referralCode: e.target.value })}
+                    className="w-full bg-stone-50 border border-stone-200 px-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 mt-4"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Verify Phone & Create Account</span>
+                </button>
+              </form>
+            )}
+
+            {/* 3. VERIFY OTP FORM */}
+            {authMode === 'verify' && (
+              <form onSubmit={handleStudentVerify} className="space-y-6">
+                <div className="bg-stone-50 border border-stone-200 p-5 rounded-2xl text-center space-y-1">
+                  <Smartphone className="w-8 h-8 text-stone-700 mx-auto" />
+                  <p className="text-stone-700 text-xs font-semibold">Verification Target Mobile</p>
+                  <p className="text-[#AA7C11] font-mono font-bold text-sm tracking-wider">{verifyForm.phone}</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold block text-center">6-Digit OTP Security Code</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    placeholder="000000"
+                    value={verifyForm.otp}
+                    onChange={(e) => setVerifyForm({ ...verifyForm, otp: e.target.value })}
+                    className="w-full bg-stone-50 border-2 border-stone-200 py-3.5 rounded-xl font-mono text-xl tracking-[1.5em] text-center focus:outline-none focus:border-[#D4AF37] text-stone-900 placeholder:opacity-40"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer"
+                  >
+                    Activate Account
+                  </button>
+
+                  <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono px-1">
+                    <button
+                      type="button"
+                      onClick={handleAuthResendOtp}
+                      className="text-[#AA7C11] hover:underline"
+                    >
+                      Resend Code via WhatsApp
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('login')}
+                      className="hover:underline hover:text-stone-800"
+                    >
+                      Back to Sign In
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {/* 4. FORGOT PASSWORD */}
+            {authMode === 'forgot' && (
+              <form onSubmit={handleStudentForgot} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Account Email or Phone</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter registered email or phone"
+                      value={forgotForm.emailOrPhone}
+                      onChange={(e) => setForgotForm({ ...forgotForm, emailOrPhone: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer"
+                  >
+                    Send Recovery OTP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthMode('login')}
+                    className="text-center text-xs font-mono text-stone-500 hover:text-stone-800 uppercase tracking-wider hover:underline py-1"
+                  >
+                    Cancel & Return
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* 5. RESET PASSWORD FORM */}
+            {authMode === 'reset' && (
+              <form onSubmit={handleStudentReset} className="space-y-4">
+                <div className="bg-stone-50 border border-stone-200 p-4 rounded-xl text-center space-y-0.5">
+                  <p className="text-stone-500 text-[10px] font-mono uppercase font-bold">Recovery Mobile</p>
+                  <p className="text-stone-800 font-mono font-bold text-xs">{resetForm.phone}</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Enter Recovery OTP Code</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    placeholder="000000"
+                    value={resetForm.otp}
+                    onChange={(e) => setResetForm({ ...resetForm, otp: e.target.value })}
+                    className="w-full bg-stone-50 border border-stone-200 py-3 text-xs rounded-xl text-center font-mono focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">New Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                    <input
+                      type="password"
+                      required
+                      placeholder="Minimum 6 characters"
+                      value={resetForm.newPassword}
+                      onChange={(e) => setResetForm({ ...resetForm, newPassword: e.target.value })}
+                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer"
+                >
+                  Set Password & Login
+                </button>
+              </form>
+            )}
+
+            {/* Simulated Google Sign-In Trigger */}
+            {(authMode === 'login' || authMode === 'signup') && (
+              <div className="space-y-4 pt-4 border-t border-stone-100">
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t border-stone-200"></div>
+                  <span className="flex-shrink mx-4 text-stone-400 font-mono text-[9px] uppercase tracking-widest font-bold">Or Continue With</span>
+                  <div className="flex-grow border-t border-stone-200"></div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGoogleLogin}
+                  className="w-full py-3 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl font-mono text-xs text-stone-700 tracking-wider font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24">
+                    <path fill="#EA4335" d="M12 5.04c1.67 0 3.2.58 4.39 1.71l3.27-3.27C17.69 1.54 14.98 1 12 1 7.35 1 3.39 3.65 1.5 7.5l3.85 3C6.31 7.54 9 5.04 12 5.04z" />
+                    <path fill="#4285F4" d="M23.5 12.25c0-.82-.07-1.61-.21-2.38H12v4.51h6.46c-.28 1.48-1.12 2.73-2.38 3.58l3.7 2.87c2.16-1.99 3.72-4.92 3.72-8.58z" />
+                    <path fill="#FBBC05" d="M5.35 14.5c-.24-.72-.38-1.49-.38-2.3c0-.81.14-1.58.38-2.3l-3.85-3C.56 8.5 0 10.18 0 12s.56 3.5 1.5 5.1l3.85-3.1z" />
+                    <path fill="#34A853" d="M12 23c3.24 0 5.96-1.08 7.95-2.92l-3.7-2.87c-1.02.69-2.33 1.1-4.25 1.1-3 0-5.69-2.5-6.65-5.46L1.5 15.95C3.39 19.85 7.35 23 12 23z" />
+                  </svg>
+                  <span>Google Social Sign-In</span>
+                </button>
+              </div>
+            )}
+          </motion.div>
         </div>
       ) : currentUser && currentUser.role === 'Admin' && !isAdminUnlocked ? (
         <div className="flex-grow flex items-center justify-center p-6 md:p-12 overflow-y-auto">
@@ -1929,10 +2828,18 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                                       {student.active ? 'Active' : 'Suspended'}
                                     </span>
                                   </td>
-                                  <td className="py-3 px-4 text-right font-mono">
+                                  <td className="py-3 px-4 text-right font-mono flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => handleLoadStudentDetail(student.id)}
+                                      className="px-2.5 py-1.5 bg-stone-100 hover:bg-[#D4AF37]/20 text-stone-700 hover:text-stone-900 rounded-lg text-[9px] uppercase tracking-wider font-bold transition-all cursor-pointer flex items-center gap-1"
+                                      title="Detailed student logs, course logins, certificates, password resets"
+                                    >
+                                      <Info className="w-3.5 h-3.5" />
+                                      <span>Log Detail</span>
+                                    </button>
                                     <button
                                       onClick={() => handleAdminStudentAction(student.id, 'toggle_active')}
-                                      className={`px-3 py-1.5 rounded-lg text-[9px] uppercase tracking-wider font-bold transition-all cursor-pointer ${
+                                      className={`px-2.5 py-1.5 rounded-lg text-[9px] uppercase tracking-wider font-bold transition-all cursor-pointer ${
                                         student.active
                                           ? 'bg-red-50 text-red-600 hover:bg-red-100'
                                           : 'bg-green-50 text-green-600 hover:bg-green-100'
@@ -3099,6 +4006,251 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         )}
       </AnimatePresence>
 
+      {/* ==========================================
+          STUDENT DETAIL HISTORY LOGS & ACTIONS MODAL
+          ========================================== */}
+      <AnimatePresence>
+        {showStudentDetailModal && selectedStudentDetail && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white text-[#111111] w-full max-w-4xl rounded-[32px] border border-[#D4AF37]/30 shadow-2xl overflow-hidden my-auto flex flex-col max-h-[90vh]"
+            >
+              {/* Luxury top accent */}
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#D4AF37] via-[#AA7C11] to-[#D4AF37]" />
+
+              {/* Header */}
+              <div className="bg-[#111111] text-white p-6 flex items-center justify-between border-b border-[#D4AF37]/25">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-stone-900 rounded-full flex items-center justify-center border border-[#D4AF37]/45 text-[#D4AF37]">
+                    <Users className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="font-serif text-lg font-bold flex items-center gap-2">
+                      <span>Admissions Audit:</span>
+                      <span className="text-[#D4AF37] italic">{selectedStudentDetail.user.name}</span>
+                    </h4>
+                    <p className="text-[10px] font-mono text-stone-400 uppercase tracking-widest mt-0.5">
+                      System logs • Course credentials • Safety console
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowStudentDetailModal(false);
+                    setSelectedStudentDetail(null);
+                  }}
+                  className="p-2 border border-stone-800 rounded-full hover:bg-stone-900 text-stone-400 hover:text-[#D4AF37] cursor-pointer transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Scrollable Container */}
+              <div className="p-6 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6 bg-stone-50/50">
+                
+                {/* Left Column: Student Dossier */}
+                <div className="lg:col-span-5 space-y-6">
+                  
+                  {/* Photo & Identity card */}
+                  <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-4 relative">
+                    <div className="absolute top-4 right-4">
+                      <span className={`inline-flex items-center gap-1 font-mono text-[9px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                        selectedStudentDetail.user.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {selectedStudentDetail.user.active ? 'Active' : 'Suspended'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <img 
+                        src={selectedStudentDetail.user.avatar || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120'} 
+                        className="w-16 h-16 rounded-full object-cover border-2 border-[#D4AF37]/40 shadow-sm"
+                      />
+                      <div>
+                        <h5 className="font-serif text-base font-bold text-stone-900">{selectedStudentDetail.user.name}</h5>
+                        <p className="text-[10px] font-mono text-[#AA7C11] tracking-wider uppercase font-bold">{selectedStudentDetail.user.role} Account</p>
+                        <p className="text-[10px] font-mono text-stone-400 mt-0.5">ID: {selectedStudentDetail.user.studentId || 'N/A'}</p>
+                      </div>
+                    </div>
+
+                    {/* Dossier Grid */}
+                    <div className="grid grid-cols-2 gap-3 text-[10px] font-mono text-stone-600 border-t border-stone-100 pt-4">
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">Email:</span>
+                        <div className="font-bold text-stone-900 truncate">{selectedStudentDetail.user.email}</div>
+                      </div>
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">Mobile:</span>
+                        <div className="font-bold text-stone-900">{selectedStudentDetail.user.phone || 'N/A'}</div>
+                      </div>
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">WhatsApp:</span>
+                        <div className="font-bold text-green-600">{selectedStudentDetail.user.whatsapp || selectedStudentDetail.user.phone || 'N/A'}</div>
+                      </div>
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">City/State:</span>
+                        <div className="font-bold text-stone-900 truncate">{selectedStudentDetail.user.city ? `${selectedStudentDetail.user.city}, ${selectedStudentDetail.user.state}` : 'N/A'}</div>
+                      </div>
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">Batch:</span>
+                        <div className="font-bold text-stone-900">{selectedStudentDetail.user.batch || 'Morning Batch'}</div>
+                      </div>
+                      <div>
+                        <span className="text-stone-400 uppercase text-[9px]">DOB / Gender:</span>
+                        <div className="font-bold text-stone-900 truncate">
+                          {selectedStudentDetail.user.dob || 'N/A'} • {selectedStudentDetail.user.gender || 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Safety Actions Block */}
+                  <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-4">
+                    <h6 className="font-mono text-[10px] uppercase tracking-wider text-stone-400 font-bold border-b border-stone-100 pb-2">Safety Controls</h6>
+                    
+                    {/* Password reset form */}
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-mono text-stone-500 uppercase font-bold">Override Access Password</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="student123"
+                          value={adminResetPassField}
+                          onChange={(e) => setAdminResetPassField(e.target.value)}
+                          className="flex-1 bg-stone-50 border border-stone-200 px-3 py-1.5 text-xs rounded-lg focus:outline-none focus:border-[#D4AF37]"
+                        />
+                        <button
+                          onClick={handleAdminResetPassword}
+                          className="px-3 py-1.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-[10px] uppercase font-bold tracking-wider rounded-lg transition-all"
+                        >
+                          Overrule
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick suspend and delete */}
+                    <div className="flex gap-2 pt-2 border-t border-stone-100">
+                      <button
+                        onClick={() => handleAdminStudentAction(selectedStudentDetail.user.id, 'toggle_active')}
+                        className={`flex-1 py-2 rounded-lg font-mono text-[9px] uppercase font-bold tracking-wider transition-all ${
+                          selectedStudentDetail.user.active 
+                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-700'
+                            : 'bg-green-50 hover:bg-green-100 text-green-700'
+                        }`}
+                      >
+                        {selectedStudentDetail.user.active ? "Suspend Student" : "Revoke Suspension"}
+                      </button>
+                      <button
+                        onClick={handleAdminDeleteStudent}
+                        className="py-2 px-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg font-mono text-[9px] uppercase font-bold tracking-wider transition-all flex items-center justify-center gap-1"
+                        title="Delete Student Account Permanently"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Purge</span>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right Column: Interactive Logs & Logs Tab */}
+                <div className="lg:col-span-7 space-y-6">
+                  
+                  {/* Activity Tab section */}
+                  <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-4">
+                    <h6 className="font-mono text-[10px] uppercase tracking-wider text-[#AA7C11] font-bold border-b border-stone-100 pb-2 flex items-center justify-between">
+                      <span>Course Credentials & Logs</span>
+                      <span className="bg-stone-100 px-2 py-0.5 rounded text-[8px] text-stone-500 font-bold">{selectedStudentDetail.logs.length} Log Entries</span>
+                    </h6>
+
+                    {/* Log details list */}
+                    <div className="space-y-2.5 max-h-[25vh] overflow-y-auto pr-1">
+                      {selectedStudentDetail.logs.length === 0 ? (
+                        <p className="text-center text-stone-400 text-[11px] font-mono py-4">No recent session logs recorded for this student.</p>
+                      ) : (
+                        selectedStudentDetail.logs.map((log: any) => (
+                          <div key={log.id} className="border border-stone-100 bg-stone-50 p-2.5 rounded-xl flex items-start justify-between text-[10px] font-mono">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-1.5 h-1.5 rounded-full ${log.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
+                                <strong className="text-stone-800 capitalize">{log.action.replace('_', ' ')}</strong>
+                              </div>
+                              <p className="text-stone-400 text-[9px]">{new Date(log.timestamp).toLocaleString()}</p>
+                              {log.details && <p className="text-stone-500 italic mt-0.5 text-[9px]">Details: {log.details}</p>}
+                            </div>
+                            <div className="text-right text-[9px] text-stone-400 space-y-0.5">
+                              <div>IP: {log.ip || '127.0.0.1'}</div>
+                              <div>{log.device || 'Web App Client'}</div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Academic Milestones / Enrolled Courses list */}
+                  <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm space-y-4">
+                    <h6 className="font-mono text-[10px] uppercase tracking-wider text-stone-400 font-bold border-b border-stone-100 pb-2">Academy Activity Grid</h6>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                      
+                      {/* Enrolled Courses */}
+                      <div className="space-y-2">
+                        <span className="text-[10px] text-stone-400 font-bold flex items-center gap-1">
+                          <BookOpen className="w-3.5 h-3.5 text-[#D4AF37]" />
+                          <span>Purchases ({selectedStudentDetail.courses?.length || 0})</span>
+                        </span>
+                        <div className="border border-stone-100 rounded-xl p-3 bg-stone-50 space-y-1.5 max-h-[14vh] overflow-y-auto">
+                          {(!selectedStudentDetail.courses || selectedStudentDetail.courses.length === 0) ? (
+                            <div className="text-[10px] text-stone-400">No active course enrollments.</div>
+                          ) : (
+                            selectedStudentDetail.courses.map((courseId: string) => (
+                              <div key={courseId} className="text-stone-800 font-bold text-[10px] border-b border-stone-100 pb-1 last:border-none">
+                                • {courseId}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Earned Certificates */}
+                      <div className="space-y-2">
+                        <span className="text-[10px] text-stone-400 font-bold flex items-center gap-1">
+                          <Award className="w-3.5 h-3.5 text-green-600 animate-bounce" />
+                          <span>Certificates ({selectedStudentDetail.certificates?.length || 0})</span>
+                        </span>
+                        <div className="border border-stone-100 rounded-xl p-3 bg-stone-50 space-y-1.5 max-h-[14vh] overflow-y-auto">
+                          {(!selectedStudentDetail.certificates || selectedStudentDetail.certificates.length === 0) ? (
+                            <div className="text-[10px] text-stone-400">No certificates issued yet.</div>
+                          ) : (
+                            selectedStudentDetail.certificates.map((cert: any) => (
+                              <div key={cert.id} className="text-stone-800 font-bold text-[10px] border-b border-stone-100 pb-1 last:border-none">
+                                • {cert.title}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* Footer */}
+              <div className="bg-[#111111] text-white p-4 text-center border-t border-[#D4AF37]/25 text-[10px] font-mono text-stone-400">
+                Pearls Academy Administration System logs are encrypted under ISO/IEC 27001 standard.
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
@@ -3472,7 +4624,7 @@ function LiveClassroomWindow({ session, user, onLeave }: ClassroomProps) {
                     Demonstrating a digital CAD tailoring layout blueprint for high-precision katori bust dart calibrations.
                   </p>
                   <img
-                    src="https://images.unsplash.com/photo-1544816155-12df9643f363?q=80&w=400"
+                    src="https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=400"
                     alt="Simulated CAD pattern drawing layout"
                     className="w-80 h-48 rounded-xl object-cover border border-stone-800 shadow mx-auto"
                     referrerPolicy="no-referrer"
