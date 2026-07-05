@@ -6,8 +6,7 @@ import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { Firestore } from "@google-cloud/firestore";
 
 dotenv.config();
 
@@ -17,22 +16,23 @@ try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const firebaseConfig = {
-      apiKey: config.apiKey,
-      authDomain: config.authDomain,
-      projectId: config.projectId,
-      storageBucket: config.storageBucket,
-      messagingSenderId: config.messagingSenderId,
-      appId: config.appId
-    };
-    const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-    firestore = getFirestore(firebaseApp, config.firestoreDatabaseId);
-    console.log("Firestore Web Client SDK initialized successfully with Database ID:", config.firestoreDatabaseId);
+    if (config.firestoreDatabaseId) {
+      firestore = new Firestore({
+        projectId: config.projectId,
+        databaseId: config.firestoreDatabaseId
+      });
+      console.log("Firestore Node.js SDK initialized successfully with Database ID:", config.firestoreDatabaseId);
+    } else {
+      firestore = new Firestore({
+        projectId: config.projectId
+      });
+      console.log("Firestore Node.js SDK initialized successfully with default database.");
+    }
   } else {
     console.log("firebase-applet-config.json not found, offline backup mode active");
   }
 } catch (err) {
-  console.error("Failed to initialize Firestore Web Client SDK, relying on local backup file:", err);
+  console.error("Failed to initialize Firestore Node.js SDK, relying on local backup file:", err);
 }
 
 const app = express();
@@ -279,8 +279,8 @@ let submissions = [
     fileUrl: 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800',
     fileName: 'straight_seams_neha.jpg',
     submittedAt: '2026-06-28',
-    marks: undefined,
-    feedback: undefined,
+    marks: null,
+    feedback: null,
     status: 'submitted'
   }
 ];
@@ -494,6 +494,26 @@ let liveClassJoins: any[] = [];
 // ==========================================
 const DB_FILE = path.join(process.cwd(), 'database.json');
 
+function sanitizeFirestoreData(data: any): any {
+  if (data === undefined) {
+    return null;
+  }
+  if (data === null) {
+    return null;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeFirestoreData(item));
+  }
+  if (typeof data === 'object') {
+    const clean: any = {};
+    for (const key of Object.keys(data)) {
+      clean[key] = sanitizeFirestoreData(data[key]);
+    }
+    return clean;
+  }
+  return data;
+}
+
 function saveDB() {
   try {
     const data = {
@@ -544,9 +564,15 @@ function saveDB() {
 
     Promise.all(
       collectionsToSave.map(col => {
-        const docRef = doc(firestore, 'pearls_db', col.key);
-        return setDoc(docRef, {
-          items: col.data,
+        if (!Array.isArray(col.data)) {
+          console.error(`Validation failed for collection ${col.key}: data is not an array.`);
+          return Promise.resolve();
+        }
+
+        const cleanData = sanitizeFirestoreData(col.data);
+        const docRef = firestore.collection('pearls_db').doc(col.key);
+        return docRef.set({
+          items: cleanData,
           updatedAt: new Date().toISOString()
         }).catch(err => {
           console.error(`Error backup-saving ${col.key} to Firestore:`, err);
@@ -626,25 +652,18 @@ async function loadDB() {
 
       // Connection verification with dynamic database fallback
       try {
-        const testDocRef = doc(firestore, 'pearls_db', 'subscribers');
-        await getDoc(testDocRef);
+        const testDocRef = firestore.collection('pearls_db').doc('subscribers');
+        await testDocRef.get();
       } catch (testErr: any) {
-        const isPermissionDenied = testErr?.code === 'permission-denied' || testErr?.message?.includes('permission') || testErr?.message?.includes('Permission');
-        if (isPermissionDenied) {
-          console.warn("Access denied on custom Firestore database. Falling back to default database...");
+        const isPermissionOrNotFound = testErr?.code === 7 || testErr?.code === 5 || testErr?.message?.includes('permission') || testErr?.message?.includes('Permission') || testErr?.message?.includes('NOT_FOUND');
+        if (isPermissionOrNotFound) {
+          console.warn("Access denied or not found on custom Firestore database. Falling back to default database...");
           const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
           if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            const firebaseConfig = {
-              apiKey: config.apiKey,
-              authDomain: config.authDomain,
-              projectId: config.projectId,
-              storageBucket: config.storageBucket,
-              messagingSenderId: config.messagingSenderId,
-              appId: config.appId
-            };
-            const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-            firestore = getFirestore(firebaseApp);
+            firestore = new Firestore({
+              projectId: config.projectId
+            });
             console.log("Re-initialized Firestore using the default database.");
           }
         } else {
@@ -653,9 +672,9 @@ async function loadDB() {
       }
 
       for (const col of collectionsToLoad) {
-        const docRef = doc(firestore, 'pearls_db', col.key);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
+        const docRef = firestore.collection('pearls_db').doc(col.key);
+        const docSnap = await docRef.get();
+        if (docSnap.exists) {
           const docData = docSnap.data();
           if (docData && Array.isArray(docData.items)) {
             col.target.splice(0, col.target.length, ...docData.items);
@@ -1022,8 +1041,8 @@ app.post("/api/academy/assignments/submit", (req, res) => {
     fileUrl: 'https://images.unsplash.com/photo-1524295981977-6282939a04a5?q=80&w=800',
     fileName: fileName || 'pattern_layout.pdf',
     submittedAt: new Date().toISOString().split('T')[0],
-    marks: undefined,
-    feedback: undefined,
+    marks: null,
+    feedback: null,
     status: 'submitted' as const
   };
 
