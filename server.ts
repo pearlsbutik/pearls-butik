@@ -164,7 +164,7 @@ let academyCourses = [
   }
 ];
 
-let liveClasses = [
+let liveClasses: any[] = [
   {
     id: 'lc1',
     courseTitle: 'Blouse Designing Special Course',
@@ -427,6 +427,251 @@ app.post("/api/academy/classes/action", (req, res) => {
   }
 
   res.json({ success: true, liveClass: targetClass });
+});
+
+// ==========================================
+// LIVE CLASS MANAGEMENT SYSTEM ENDPOINTS
+// ==========================================
+
+let liveClassJoins: any[] = [];
+
+// 1. Get all live classes
+app.get("/api/live-classes", (req, res) => {
+  res.json(liveClasses);
+});
+
+// 2. Create a new live class (Admin/Teacher)
+app.post("/api/live-classes", (req, res) => {
+  const {
+    courseTitle,
+    batch,
+    topic,
+    description,
+    instructor,
+    date,
+    time,
+    startTime,
+    endTime,
+    duration,
+    meetingLink,
+    meetingCode,
+    thumbnail,
+    notes,
+    status
+  } = req.body;
+
+  if (!courseTitle || !topic || !date || !meetingLink) {
+    return res.status(400).json({ error: "Missing required parameters (courseTitle, topic, date, meetingLink)." });
+  }
+
+  const id = `lc-${Math.floor(1000 + Math.random() * 9000)}`;
+  const newClass = {
+    id,
+    courseTitle,
+    batch: batch || 'All Batches',
+    topic,
+    description: description || '',
+    instructor: instructor || 'Pratibha Ingole',
+    date,
+    time: time || `${startTime || '12:00 PM'} - ${endTime || '1:00 PM'}`,
+    startTime: startTime || '12:00 PM',
+    endTime: endTime || '1:00 PM',
+    duration: duration || '1 Hour',
+    meetingLink,
+    meetingCode: meetingCode || meetingLink.split('/').pop() || '',
+    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=800',
+    notes: notes || [],
+    recordings: [],
+    status: status || 'scheduled'
+  };
+
+  liveClasses.unshift(newClass);
+
+  // Send notifications to all enrolled students if published
+  if (newClass.status !== 'draft') {
+    enrollments.forEach(enr => {
+      if (enr.courseTitle === courseTitle) {
+        notifications.unshift({
+          id: `nt-${Math.floor(Math.random() * 10000)}`,
+          userEmail: enr.userEmail,
+          title: '🎥 New Live Class Scheduled',
+          text: `Pratibha Ingole scheduled "${topic}" on ${date} at ${newClass.time}.`,
+          date: 'Just now',
+          read: false
+        });
+      }
+    });
+  }
+
+  res.json({ success: true, liveClass: newClass });
+});
+
+// 3. Update a live class (including recordings, notes, assignments after class)
+app.put("/api/live-classes/:id", (req, res) => {
+  const { id } = req.params;
+  const index = liveClasses.findIndex(c => c.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Live class not found." });
+  }
+
+  // Get current class status before update to check if transitioning to active or completed
+  const oldStatus = liveClasses[index].status;
+
+  const updatedClass = {
+    ...liveClasses[index],
+    ...req.body
+  };
+
+  liveClasses[index] = updatedClass;
+
+  // If transitioned from draft to scheduled/published, send notifications
+  if (oldStatus === 'draft' && updatedClass.status === 'scheduled') {
+    enrollments.forEach(enr => {
+      if (enr.courseTitle === updatedClass.courseTitle) {
+        notifications.unshift({
+          id: `nt-${Math.floor(Math.random() * 10000)}`,
+          userEmail: enr.userEmail,
+          title: '🎥 New Live Class Scheduled',
+          text: `Pratibha Ingole published "${updatedClass.topic}" on ${updatedClass.date} at ${updatedClass.time}.`,
+          date: 'Just now',
+          read: false
+        });
+      }
+    });
+  }
+
+  // Send recording uploaded notification if recording is added
+  if (req.body.recordings && req.body.recordings.length > 0 && (!liveClasses[index].recordings || liveClasses[index].recordings.length === 0)) {
+    enrollments.forEach(enr => {
+      if (enr.courseTitle === updatedClass.courseTitle) {
+        notifications.unshift({
+          id: `nt-${Math.floor(Math.random() * 10000)}`,
+          userEmail: enr.userEmail,
+          title: '📀 Class Recording Available',
+          text: `Recording for "${updatedClass.topic}" is now available in your Live Classes history!`,
+          date: 'Just now',
+          read: false
+        });
+      }
+    });
+  }
+
+  res.json({ success: true, liveClass: updatedClass });
+});
+
+// 4. Delete a live class
+app.delete("/api/live-classes/:id", (req, res) => {
+  const { id } = req.params;
+  const index = liveClasses.findIndex(c => c.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Live class not found." });
+  }
+
+  const deletedClass = liveClasses.splice(index, 1)[0];
+  res.json({ success: true, deletedClass });
+});
+
+// 5. Join Live Class (Automated Attendance and logs)
+app.post("/api/live-class/join", (req, res) => {
+  const { classId, userEmail, userName, ip, browser } = req.body;
+  if (!classId || !userEmail) {
+    return res.status(400).json({ error: "Missing required fields (classId, userEmail)." });
+  }
+
+  const liveClass = liveClasses.find(c => c.id === classId);
+  if (!liveClass) {
+    return res.status(404).json({ error: "Class not found." });
+  }
+
+  const joinId = `join-${Math.floor(1000 + Math.random() * 9000)}`;
+  const joinRecord = {
+    id: joinId,
+    classId,
+    courseTitle: liveClass.courseTitle,
+    topic: liveClass.topic,
+    userEmail,
+    userName: userName || userEmail.split('@')[0].toUpperCase(),
+    joinTime: new Date().toISOString(),
+    leaveTime: null,
+    duration: 0,
+    ip: ip || req.ip || '127.0.0.1',
+    browser: browser || req.headers['user-agent'] || 'Unknown Browser'
+  };
+
+  liveClassJoins.push(joinRecord);
+
+  // Record/update global attendance logs as well to sync
+  const alreadyAttended = attendanceLogs.some(
+    a => a.userEmail === userEmail && a.topic === liveClass.topic
+  );
+  if (!alreadyAttended) {
+    attendanceLogs.push({
+      id: `at-${Math.floor(Math.random() * 10000)}`,
+      userEmail,
+      courseTitle: liveClass.courseTitle,
+      topic: liveClass.topic,
+      status: 'Present',
+      date: new Date().toISOString().split('T')[0]
+    });
+  }
+
+  res.json({ success: true, joinRecord });
+});
+
+// 6. Leave Live Class (Duration calculation & final attendance update)
+app.post("/api/live-class/leave", (req, res) => {
+  const { classId, userEmail } = req.body;
+  if (!classId || !userEmail) {
+    return res.status(400).json({ error: "Missing required fields (classId, userEmail)." });
+  }
+
+  // Find the latest active join record for this user and class
+  const record = [...liveClassJoins]
+    .reverse()
+    .find(r => r.classId === classId && r.userEmail === userEmail && r.leaveTime === null);
+
+  if (!record) {
+    return res.status(404).json({ error: "No active join record found." });
+  }
+
+  const leaveTime = new Date().toISOString();
+  const joinDate = new Date(record.joinTime);
+  const leaveDate = new Date(leaveTime);
+  const diffMs = leaveDate.getTime() - joinDate.getTime();
+  const diffMins = Math.round(diffMs / 60000); // Minutes
+
+  record.leaveTime = leaveTime;
+  record.duration = Math.max(1, diffMins); // at least 1 minute
+
+  res.json({ success: true, record });
+});
+
+// 7. Get attendance for a class ID
+app.get("/api/live-class/attendance/:id", (req, res) => {
+  const { id } = req.params;
+  const records = liveClassJoins.filter(r => r.classId === id);
+  res.json(records);
+});
+
+// 8. Get live class history (completed classes and attendance analysis)
+app.get("/api/live-class/history", (req, res) => {
+  const completedClasses = liveClasses.filter(c => c.status === 'completed' || c.status === 'ended');
+  const history = completedClasses.map(c => {
+    const classJoins = liveClassJoins.filter(r => r.classId === c.id);
+    const uniqueStudentsCount = new Set(classJoins.map(r => r.userEmail)).size;
+    const avgDuration = classJoins.length > 0
+      ? Math.round(classJoins.reduce((acc, curr) => acc + (curr.duration || 0), 0) / classJoins.length)
+      : 0;
+
+    return {
+      ...c,
+      uniqueStudentsCount,
+      avgDuration,
+      attendees: classJoins
+    };
+  });
+
+  res.json(history);
 });
 
 // 5. Course Catalog and Enrollment Checkout (Stripe/Razorpay Simulator)

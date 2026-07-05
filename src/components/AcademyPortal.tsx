@@ -9,8 +9,8 @@ import {
   RefreshCw, Play, CheckCircle2, Info, Star, MessageSquare, Bell, CreditCard,
   Search, ShieldCheck, AlertTriangle
 } from 'lucide-react';
-import { apiFetch } from "@/lib/api";
-import { apiFetch } from "../lib/api";
+import { apiFetch } from '../lib/api';
+import LiveClasses from './LiveClasses';
 
 // Interfaces mirroring the backend
 interface User {
@@ -1523,251 +1523,22 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                 </div>
               </div>
             )}
-
             {/* LIVE CLASSES TAB */}
             {activeTab === 'classes' && (
-              <div className="space-y-8">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-stone-200">
-                  <div>
-                    <h3 className="font-serif text-xl md:text-2xl font-bold text-stone-900">Virtual Class Coordinates</h3>
-                    <p className="text-stone-600 text-xs font-light mt-1">Join scheduled live workshops directly inside Pearls Butik. No zoom links needed.</p>
-                  </div>
-                  {(currentUser.role === 'Admin' || currentUser.role === 'Teacher') && (
-                    <button
-                      onClick={() => setShowScheduleForm(!showScheduleForm)}
-                      className="bg-[#111111] hover:bg-[#D4AF37] hover:text-black text-white px-4 py-2.5 rounded-xl text-xs font-mono uppercase tracking-widest font-bold transition-all flex items-center gap-2 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Schedule Live Lecture</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Schedule Creator Form */}
-                <AnimatePresence>
-                  {showScheduleForm && (
-                    <motion.form
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      onSubmit={handleScheduleClass}
-                      className="bg-white border border-[#D4AF37]/35 p-6 rounded-3xl shadow-sm space-y-4 overflow-hidden"
-                    >
-                      <h4 className="font-serif text-base font-bold text-stone-900">New Live Session Information</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Target Course</label>
-                          <select
-                            value={newClassCourse}
-                            onChange={(e) => setNewClassCourse(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                          >
-                            {courses.map(c => <option key={c.id} value={c.title}>{c.title}</option>)}
-                          </select>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Topic / Chapter Name</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. Princess Cut Drafting Math"
-                            value={newClassTopic}
-                            onChange={(e) => setNewClassTopic(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                            required
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Session Date</label>
-                          <input
-                            type="date"
-                            value={newClassDate}
-                            onChange={(e) => setNewClassDate(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                            required
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Start Time</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. 11:00 AM"
-                            value={newClassTime}
-                            onChange={(e) => setNewClassTime(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Duration</label>
-                          <input
-                            type="text"
-                            placeholder="e.g. 1 Hour"
-                            value={newClassDuration}
-                            onChange={(e) => setNewClassDuration(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-stone-500 font-mono uppercase">Maximum Students</label>
-                          <input
-                            type="number"
-                            value={newClassMaxStudents}
-                            onChange={(e) => setNewClassMaxStudents(e.target.value)}
-                            className="w-full bg-stone-50 border border-stone-200 p-3 rounded-xl focus:outline-none focus:border-[#D4AF37]"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowScheduleForm(false)}
-                          className="bg-stone-100 px-4 py-2 rounded-xl text-xs font-mono uppercase tracking-wider"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className="bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black px-5 py-2.5 rounded-xl text-xs font-mono uppercase tracking-widest font-bold"
-                        >
-                          Publish to Students
-                        </button>
-                      </div>
-                    </motion.form>
-                  )}
-                </AnimatePresence>
-
-                {/* Scheduled Classes List */}
-                <div className="space-y-4">
-                  {liveSessions.map((session) => {
-                    const isEnrolled = myEnrollments.some(e => e.courseTitle === session.courseTitle) || currentUser.role === 'Admin';
-                    const assocCourse = courses.find(c => c.title === session.courseTitle);
-                    const subCheck = assocCourse ? getCourseSubscription(assocCourse.id) : { status: 'Active', isPending: false, isExpired: false };
-                    return (
-                      <div key={session.id} className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-3">
-                            <span className="text-[#D4AF37] bg-[#D4AF37]/10 border border-[#D4AF37]/30 px-3 py-1 rounded-full text-[9px] font-mono uppercase tracking-wider font-bold">
-                              {session.courseTitle}
-                            </span>
-                            
-                            {session.status === 'live' ? (
-                              <span className="bg-red-500 text-white px-2.5 py-0.5 rounded text-[9px] font-mono tracking-widest uppercase font-bold animate-pulse flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                                Active Now
-                              </span>
-                            ) : session.status === 'ended' ? (
-                              <span className="bg-stone-100 text-stone-500 border border-stone-200 px-2 py-0.5 rounded text-[9px] font-mono tracking-widest uppercase">
-                                Ended
-                              </span>
-                            ) : (
-                              <span className="bg-stone-50 text-stone-600 border border-stone-200 px-2 py-0.5 rounded text-[9px] font-mono tracking-widest uppercase">
-                                Scheduled
-                              </span>
-                            )}
-                          </div>
-                          
-                          <h4 className="font-serif text-lg font-bold text-stone-900 leading-snug">{session.topic}</h4>
-                          
-                          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-stone-500 font-light">
-                            <span className="flex items-center gap-1.5">
-                              <Calendar className="w-4 h-4 text-[#D4AF37]" />
-                              {session.date}
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                              <Clock className="w-4 h-4 text-[#D4AF37]" />
-                              {session.time} ({session.duration})
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                              <Users className="w-4 h-4 text-[#D4AF37]" />
-                              Max {session.maxStudents} Students
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="shrink-0">
-                          {session.status === 'ended' ? (
-                            <button
-                              disabled
-                              className="bg-stone-50 text-stone-400 px-5 py-3 rounded-xl text-xs font-mono tracking-widest uppercase font-bold border border-stone-100"
-                            >
-                              Lecture Concluded
-                            </button>
-                          ) : isEnrolled ? (
-                            (() => {
-                              if (subCheck.isPending) {
-                                return (
-                                  <div className="text-right space-y-1">
-                                    <span className="inline-flex items-center gap-1 text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full text-[10px] font-mono uppercase font-bold border border-amber-200">
-                                      <Clock className="w-3 h-3 animate-spin" /> Pending Approval
-                                    </span>
-                                    <p className="text-[10px] text-stone-400 font-light">Lock released once verified</p>
-                                  </div>
-                                );
-                              } else if (subCheck.isExpired) {
-                                return (
-                                  <div className="text-right space-y-1.5">
-                                    <span className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-1 rounded-full text-[10px] font-mono uppercase font-bold border border-red-200">
-                                      <Lock className="w-3 h-3" /> Expired
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        if (assocCourse) {
-                                          setCheckoutCourse(assocCourse);
-                                          setBillingName(currentUser.name);
-                                          setEnrollStep(1);
-                                        }
-                                      }}
-                                      className="block ml-auto text-red-600 hover:underline font-mono text-[10px] uppercase font-bold"
-                                    >
-                                      Renew Now
-                                    </button>
-                                  </div>
-                                );
-                              } else {
-                                return (
-                                  <button
-                                    onClick={() => handleClassAction(session, currentUser.role === 'Admin' ? 'start' : 'join')}
-                                    className={`px-5 py-3 rounded-xl text-xs font-mono tracking-widest uppercase font-bold transition-all cursor-pointer ${
-                                      session.status === 'live'
-                                        ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
-                                        : 'bg-[#111111] hover:bg-[#D4AF37] text-white hover:text-black border border-stone-800'
-                                    }`}
-                                  >
-                                    {currentUser.role === 'Admin' 
-                                      ? (session.status === 'live' ? 'Enter Live Room' : 'Start Live Stream')
-                                      : 'Join Live Class'}
-                                  </button>
-                                );
-                              }
-                            })()
-                          ) : (
-                            <div className="space-y-2 text-right md:max-w-[200px]">
-                              <button
-                                onClick={() => {
-                                  if (assocCourse) {
-                                    setCheckoutCourse(assocCourse);
-                                    setBillingName(currentUser.name);
-                                    setEnrollStep(1);
-                                  }
-                                }}
-                                className="bg-[#111111] text-[#D4AF37] border border-[#D4AF37] hover:bg-stone-900 px-4 py-2 rounded-xl text-[10px] font-mono uppercase tracking-widest font-bold cursor-pointer"
-                              >
-                                Enroll to Attend
-                              </button>
-                              <p className="text-[10px] text-stone-500 font-light italic">Requires active admission enrollment.</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <LiveClasses
+                currentUser={currentUser}
+                courses={courses}
+                enrollments={myEnrollments}
+                onToast={showToast}
+                onEnrollTrigger={(courseTitle) => {
+                  const assocCourse = courses.find(c => c.title === courseTitle);
+                  if (assocCourse) {
+                    setCheckoutCourse(assocCourse);
+                    setBillingName(currentUser.name);
+                    setEnrollStep(1);
+                  }
+                }}
+              />
             )}
 
             {/* ASSIGNMENTS / HOMEWORK GRADERS */}
