@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "AcademyUser": {
+      "title": "AcademyUser",
+      "description": "Represents an academy user (Admin, Student, Guest)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Admin", "Student", "Guest"] },
+        "avatar": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "studentId": { "type": "string" },
+        "active": { "type": "boolean" },
+        "batch": { "type": "string" }
+      },
+      "required": ["id", "email", "name", "role"]
+    },
+    "PearlsDatabase": {
+      "title": "PearlsDatabase",
+      "description": "Main collection for pearls academy containing multiple document schemas",
+      "type": "object",
+      "properties": {
+        "items": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/pearls_db/{docId}": {
+      "schema": "PearlsDatabase",
+      "description": "Document storage for tables synced dynamically by backend"
+    }
+  }
+}

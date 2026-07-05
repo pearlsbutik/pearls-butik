@@ -6,8 +6,34 @@ import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
 dotenv.config();
+
+// Initialize Firestore dynamically using the generated firebase-applet-config.json
+let firestore: any = null;
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const firebaseConfig = {
+      apiKey: config.apiKey,
+      authDomain: config.authDomain,
+      projectId: config.projectId,
+      storageBucket: config.storageBucket,
+      messagingSenderId: config.messagingSenderId,
+      appId: config.appId
+    };
+    const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    firestore = getFirestore(firebaseApp, config.firestoreDatabaseId);
+    console.log("Firestore Web Client SDK initialized successfully with Database ID:", config.firestoreDatabaseId);
+  } else {
+    console.log("firebase-applet-config.json not found, offline backup mode active");
+  }
+} catch (err) {
+  console.error("Failed to initialize Firestore Web Client SDK, relying on local backup file:", err);
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -464,7 +490,7 @@ app.post("/api/academy/classes/action", (req, res) => {
 let liveClassJoins: any[] = [];
 
 // ==========================================
-// FILE-BASED PERSISTENT DATABASE SYSTEM
+// FILE-BASED & CLOUD FIRESTORE PERSISTENT DATABASE SYSTEM
 // ==========================================
 const DB_FILE = path.join(process.cwd(), 'database.json');
 
@@ -491,11 +517,51 @@ function saveDB() {
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
-    console.error("Error saving database file:", err);
+    console.error("Error saving local database file:", err);
+  }
+
+  // Asynchronously back up to Firestore in the background
+  if (firestore) {
+    const collectionsToSave = [
+      { key: 'subscribers', data: subscribers },
+      { key: 'academyUsers', data: academyUsers },
+      { key: 'academySubscriptions', data: academySubscriptions },
+      { key: 'upiPayments', data: upiPayments },
+      { key: 'otpCodes', data: otpCodes },
+      { key: 'loginHistory', data: loginHistory },
+      { key: 'whatsappLogs', data: whatsappLogs },
+      { key: 'academyCourses', data: academyCourses },
+      { key: 'liveClasses', data: liveClasses },
+      { key: 'enrollments', data: enrollments },
+      { key: 'assignments', data: assignments },
+      { key: 'submissions', data: submissions },
+      { key: 'messages', data: messages },
+      { key: 'academyNotes', data: academyNotes },
+      { key: 'notifications', data: notifications },
+      { key: 'attendanceLogs', data: attendanceLogs },
+      { key: 'liveClassJoins', data: liveClassJoins }
+    ];
+
+    Promise.all(
+      collectionsToSave.map(col => {
+        const docRef = doc(firestore, 'pearls_db', col.key);
+        return setDoc(docRef, {
+          items: col.data,
+          updatedAt: new Date().toISOString()
+        }).catch(err => {
+          console.error(`Error backup-saving ${col.key} to Firestore:`, err);
+        });
+      })
+    ).then(() => {
+      console.log("Firestore background backup completed successfully.");
+    }).catch(err => {
+      console.error("Error in background backup process:", err);
+    });
   }
 }
 
-function loadDB() {
+async function loadDB() {
+  // 1. First, load local database.json if it exists (as a starting baseline)
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf8');
@@ -517,10 +583,10 @@ function loadDB() {
       if (data.notifications) notifications.splice(0, notifications.length, ...data.notifications);
       if (data.attendanceLogs) attendanceLogs.splice(0, attendanceLogs.length, ...data.attendanceLogs);
       if (data.liveClassJoins) liveClassJoins.splice(0, liveClassJoins.length, ...data.liveClassJoins);
-      console.log("Database file loaded successfully. Users count:", academyUsers.length);
+      console.log("Loaded baseline local database.json successfully. Users count:", academyUsers.length);
     } else {
-      console.log("No database file found. Seeding with default dataset.");
-      // Seed default admin and user password hashes
+      console.log("No local baseline database.json found. Initializing with default datasets.");
+      // Seed default admin and student password hashes
       const adminUser = academyUsers.find(u => u.role === 'Admin');
       if (adminUser) {
         (adminUser as any).passwordHash = bcrypt.hashSync('admin123', 10);
@@ -529,15 +595,82 @@ function loadDB() {
       if (demoStudent) {
         (demoStudent as any).passwordHash = bcrypt.hashSync('student123', 10);
       }
-      saveDB();
     }
   } catch (err) {
-    console.error("Error loading database file:", err);
+    console.error("Error loading baseline local database file:", err);
+  }
+
+  // 2. Synchronize/restore with durable, permanent database from Firestore
+  if (firestore) {
+    try {
+      console.log("Attempting to restore database state from Google Cloud Firestore...");
+      const collectionsToLoad = [
+        { key: 'subscribers', target: subscribers },
+        { key: 'academyUsers', target: academyUsers },
+        { key: 'academySubscriptions', target: academySubscriptions },
+        { key: 'upiPayments', target: upiPayments },
+        { key: 'otpCodes', target: otpCodes },
+        { key: 'loginHistory', target: loginHistory },
+        { key: 'whatsappLogs', target: whatsappLogs },
+        { key: 'academyCourses', target: academyCourses },
+        { key: 'liveClasses', target: liveClasses },
+        { key: 'enrollments', target: enrollments },
+        { key: 'assignments', target: assignments },
+        { key: 'submissions', target: submissions },
+        { key: 'messages', target: messages },
+        { key: 'academyNotes', target: academyNotes },
+        { key: 'notifications', target: notifications },
+        { key: 'attendanceLogs', target: attendanceLogs },
+        { key: 'liveClassJoins', target: liveClassJoins }
+      ];
+
+      // Connection verification with dynamic database fallback
+      try {
+        const testDocRef = doc(firestore, 'pearls_db', 'subscribers');
+        await getDoc(testDocRef);
+      } catch (testErr: any) {
+        const isPermissionDenied = testErr?.code === 'permission-denied' || testErr?.message?.includes('permission') || testErr?.message?.includes('Permission');
+        if (isPermissionDenied) {
+          console.warn("Access denied on custom Firestore database. Falling back to default database...");
+          const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+          if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            const firebaseConfig = {
+              apiKey: config.apiKey,
+              authDomain: config.authDomain,
+              projectId: config.projectId,
+              storageBucket: config.storageBucket,
+              messagingSenderId: config.messagingSenderId,
+              appId: config.appId
+            };
+            const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+            firestore = getFirestore(firebaseApp);
+            console.log("Re-initialized Firestore using the default database.");
+          }
+        } else {
+          throw testErr;
+        }
+      }
+
+      for (const col of collectionsToLoad) {
+        const docRef = doc(firestore, 'pearls_db', col.key);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const docData = docSnap.data();
+          if (docData && Array.isArray(docData.items)) {
+            col.target.splice(0, col.target.length, ...docData.items);
+            console.log(`Restored table '${col.key}' from Firestore. Rows count: ${col.target.length}`);
+          }
+        } else {
+          console.log(`Table '${col.key}' does not exist in Firestore yet. It will be created on the next saveDB().`);
+        }
+      }
+      console.log("Successfully synchronized all data from Firestore!");
+    } catch (err) {
+      console.error("Error restoring database from Firestore (will use local memory/file instead):", err);
+    }
   }
 }
-
-// Automatically load database on startup
-loadDB();
 
 // 1. Get all live classes
 app.get("/api/live-classes", (req, res) => {
@@ -2141,6 +2274,13 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Vite & Static Asset Handling
 async function startServer() {
+  // Load database from Firestore (or local baseline) asynchronously before starting server
+  try {
+    await loadDB();
+  } catch (err) {
+    console.error("Critical error during database load:", err);
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
