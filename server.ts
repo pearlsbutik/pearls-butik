@@ -7,32 +7,95 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import { Firestore } from "@google-cloud/firestore";
+import * as admin from "firebase-admin";
 
 dotenv.config();
 
-// Initialize Firestore dynamically using the generated firebase-applet-config.json
+// Initialize Firestore dynamically using environment variables or fallback config
 let firestore: any = null;
 try {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+  // Read local fallback config
+  let config: any = {};
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (config.firestoreDatabaseId) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } catch (e) {
+      console.error("Failed to parse firebase-applet-config.json:", e);
+    }
+  }
+
+  const finalProjectId = projectId || config.projectId;
+  const databaseId = config.firestoreDatabaseId;
+
+  const hasEnvCredentials = !!(projectId && clientEmail && privateKey);
+
+  if (hasEnvCredentials) {
+    console.log("Checking and parsing Firebase Admin credentials from environment variables...");
+    // Trim and clean private key
+    let cleanPrivateKey = privateKey!.trim();
+    if (cleanPrivateKey.startsWith('"') && cleanPrivateKey.endsWith('"')) {
+      cleanPrivateKey = cleanPrivateKey.substring(1, cleanPrivateKey.length - 1);
+    }
+    if (cleanPrivateKey.startsWith("'") && cleanPrivateKey.endsWith("'")) {
+      cleanPrivateKey = cleanPrivateKey.substring(1, cleanPrivateKey.length - 1);
+    }
+    cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, "\n");
+
+    const isKeyValid = cleanPrivateKey.includes("-----BEGIN PRIVATE KEY-----") && cleanPrivateKey.includes("-----END PRIVATE KEY-----");
+
+    if (isKeyValid) {
+      const firebaseAdmin = admin as any;
+      if (!firebaseAdmin.apps?.length) {
+        firebaseAdmin.initializeApp({
+          credential: firebaseAdmin.credential.cert({
+            projectId: finalProjectId,
+            clientEmail: clientEmail!,
+            privateKey: cleanPrivateKey
+          })
+        });
+        console.log("Firebase Admin SDK initialized successfully with environment service account.");
+      }
+
+      // Initialize Firestore using service account credentials
       firestore = new Firestore({
-        projectId: config.projectId,
-        databaseId: config.firestoreDatabaseId
+        projectId: finalProjectId,
+        databaseId: databaseId || undefined,
+        credentials: {
+          client_email: clientEmail,
+          private_key: cleanPrivateKey
+        }
       });
-      console.log("Firestore Node.js SDK initialized successfully with Database ID:", config.firestoreDatabaseId);
+      console.log("Firestore Node.js SDK initialized successfully with Service Account.");
     } else {
-      firestore = new Firestore({
-        projectId: config.projectId
-      });
-      console.log("Firestore Node.js SDK initialized successfully with default database.");
+      console.error("Firebase credentials validation failed: FIREBASE_PRIVATE_KEY is not in valid PEM format (missing BEGIN/END headers).");
+      throw new Error("Invalid private key format in environment variables.");
     }
   } else {
-    console.log("firebase-applet-config.json not found, offline backup mode active");
+    console.warn("Firebase credentials (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY) are missing from environment variables.");
+    if (config.projectId) {
+      if (config.firestoreDatabaseId) {
+        firestore = new Firestore({
+          projectId: config.projectId,
+          databaseId: config.firestoreDatabaseId
+        });
+        console.log("Firestore Node.js SDK initialized using config file with Project ID:", config.projectId, "Database ID:", config.firestoreDatabaseId);
+      } else {
+        firestore = new Firestore({
+          projectId: config.projectId
+        });
+        console.log("Firestore Node.js SDK initialized using config file with Project ID:", config.projectId);
+      }
+    } else {
+      console.log("No config file or environment credentials found, offline backup mode active (using local database.json)");
+    }
   }
-} catch (err) {
-  console.error("Failed to initialize Firestore Node.js SDK, relying on local backup file:", err);
+} catch (err: any) {
+  console.error("Failed to initialize Firestore Node.js SDK, relying on local backup file:", err?.message || err);
 }
 
 const app = express();
