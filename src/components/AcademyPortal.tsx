@@ -3376,30 +3376,12 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                     <div className="absolute top-0 right-0 w-20 h-20 bg-[#D4AF37]/5 rounded-full blur-xl" />
                     
                     <div className="bg-white p-3 rounded-2xl inline-block mx-auto shadow-md">
-                      {/* Elegant SVG visual dummy for QR */}
-                      <svg className="w-36 h-36 mx-auto text-stone-900" viewBox="0 0 100 100">
-                        <rect x="0" y="0" width="20" height="20" fill="currentColor"/>
-                        <rect x="5" y="5" width="10" height="10" fill="white"/>
-                        <rect x="80" y="0" width="20" height="20" fill="currentColor"/>
-                        <rect x="85" y="5" width="10" height="10" fill="white"/>
-                        <rect x="0" y="80" width="20" height="20" fill="currentColor"/>
-                        <rect x="5" y="85" width="10" height="10" fill="white"/>
-                        <rect x="40" y="40" width="20" height="20" fill="currentColor"/>
-                        <rect x="45" y="45" width="10" height="10" fill="white"/>
-                        {/* Static points representing complex QR code patterns */}
-                        <circle cx="10" cy="30" r="3" fill="currentColor"/>
-                        <circle cx="30" cy="10" r="3" fill="currentColor"/>
-                        <circle cx="30" cy="30" r="4" fill="currentColor"/>
-                        <circle cx="50" cy="15" r="3" fill="currentColor"/>
-                        <circle cx="15" cy="50" r="3" fill="currentColor"/>
-                        <circle cx="65" cy="50" r="4" fill="currentColor"/>
-                        <circle cx="50" cy="65" r="3" fill="currentColor"/>
-                        <circle cx="30" cy="70" r="3.5" fill="currentColor"/>
-                        <circle cx="70" cy="30" r="3" fill="currentColor"/>
-                        <circle cx="70" cy="70" r="4" fill="currentColor"/>
-                        <circle cx="90" cy="40" r="3" fill="currentColor"/>
-                        <circle cx="40" cy="90" r="3" fill="currentColor"/>
-                      </svg>
+                      <img 
+                        src="/src/assets/images/pratibha_ingole_1783095676300.jpg" 
+                        alt="P.R. Ingole UPI QR Code" 
+                        className="w-44 h-44 object-contain mx-auto rounded-xl"
+                        referrerPolicy="no-referrer"
+                      />
                     </div>
 
                     <div className="space-y-1.5 font-mono text-[10px]">
