@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
+import crypto from "crypto";
 import { Firestore } from "@google-cloud/firestore";
 import * as admin from "firebase-admin";
 
@@ -100,9 +101,11 @@ try {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'pearls_secret_jwt_key_2026';
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // CORS
 app.use((req, res, next) => {
@@ -186,6 +189,11 @@ let upiPayments = [
 ];
 
 let otpCodes: any[] = [];
+
+let paymentSettings = {
+  qrCodeUrl: '',
+  updatedAt: ''
+};
 
 let loginHistory = [
   { id: 'log-1', phone: '9876543210', fullName: 'Neha Sharma', timestamp: '2026-07-03 08:32 AM', status: 'Success', ip: '192.168.1.45' },
@@ -403,8 +411,16 @@ app.get("/api/academy/state", (req, res) => {
   // Support and Chat
   const chatSupport = messages.filter(m => m.channel === 'support');
 
+  // Generate JWT token for this user so subsequent API calls are fully authenticated
+  const stateToken = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+
   res.json({
     user,
+    token: stateToken,
     courses: academyCourses,
     liveClasses,
     enrollments: myEnrollments,
@@ -454,9 +470,19 @@ app.post("/api/academy/auth", (req, res) => {
       date: 'Just now',
       read: false
     });
-    return res.json({ success: true, user: newUser });
+    const token = jwt.sign(
+      { id: newUser.id, email: newUser.email, role: newUser.role },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    return res.json({ success: true, user: newUser, token });
   }
-  res.json({ success: true, user });
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+  res.json({ success: true, user, token });
 });
 
 // 3. Class Scheduling
@@ -596,7 +622,8 @@ function saveDB() {
       academyNotes,
       notifications,
       attendanceLogs,
-      liveClassJoins
+      liveClassJoins,
+      paymentSettings
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
@@ -625,23 +652,30 @@ function saveDB() {
       { key: 'liveClassJoins', data: liveClassJoins }
     ];
 
-    Promise.all(
-      collectionsToSave.map(col => {
-        if (!Array.isArray(col.data)) {
-          console.error(`Validation failed for collection ${col.key}: data is not an array.`);
-          return Promise.resolve();
-        }
+    const savePromises: Promise<any>[] = collectionsToSave.map(col => {
+      if (!Array.isArray(col.data)) {
+        console.error(`Validation failed for collection ${col.key}: data is not an array.`);
+        return Promise.resolve();
+      }
 
-        const cleanData = sanitizeFirestoreData(col.data);
-        const docRef = firestore.collection('pearls_db').doc(col.key);
-        return docRef.set({
-          items: cleanData,
-          updatedAt: new Date().toISOString()
-        }).catch(err => {
-          console.error(`Error backup-saving ${col.key} to Firestore:`, err);
-        });
-      })
-    ).then(() => {
+      const cleanData = sanitizeFirestoreData(col.data);
+      const docRef = firestore.collection('pearls_db').doc(col.key);
+      return docRef.set({
+        items: cleanData,
+        updatedAt: new Date().toISOString()
+      }).catch(err => {
+        console.error(`Error backup-saving ${col.key} to Firestore:`, err);
+      });
+    });
+
+    // Also back up paymentSettings to Firestore
+    const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
+    const settingsPromise = settingsDocRef.set(sanitizeFirestoreData(paymentSettings)).catch(err => {
+      console.error("Error backup-saving paymentSettings to Firestore:", err);
+    });
+    savePromises.push(settingsPromise);
+
+    Promise.all(savePromises).then(() => {
       console.log("Firestore background backup completed successfully.");
     }).catch(err => {
       console.error("Error in background backup process:", err);
@@ -672,6 +706,12 @@ async function loadDB() {
       if (data.notifications) notifications.splice(0, notifications.length, ...data.notifications);
       if (data.attendanceLogs) attendanceLogs.splice(0, attendanceLogs.length, ...data.attendanceLogs);
       if (data.liveClassJoins) liveClassJoins.splice(0, liveClassJoins.length, ...data.liveClassJoins);
+      if (data.paymentSettings) {
+        paymentSettings = {
+          qrCodeUrl: data.paymentSettings.qrCodeUrl || '',
+          updatedAt: data.paymentSettings.updatedAt || ''
+        };
+      }
       console.log("Loaded baseline local database.json successfully. Users count:", academyUsers.length);
     } else {
       console.log("No local baseline database.json found. Initializing with default datasets.");
@@ -747,6 +787,27 @@ async function loadDB() {
           console.log(`Table '${col.key}' does not exist in Firestore yet. It will be created on the next saveDB().`);
         }
       }
+
+      // Restore paymentSettings from Firestore
+      try {
+        const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
+        const settingsSnap = await settingsDocRef.get();
+        if (settingsSnap.exists) {
+          const docData = settingsSnap.data();
+          if (docData) {
+            paymentSettings = {
+              qrCodeUrl: docData.qrCodeUrl || '',
+              updatedAt: docData.updatedAt || ''
+            };
+            console.log("Restored paymentSettings from Firestore:", paymentSettings);
+          }
+        } else {
+          console.log("Table 'paymentSettings' does not exist in Firestore yet. It will be created on the next saveDB().");
+        }
+      } catch (settingsErr) {
+        console.error("Error restoring paymentSettings from Firestore:", settingsErr);
+      }
+
       console.log("Successfully synchronized all data from Firestore!");
     } catch (err) {
       console.error("Error restoring database from Firestore (will use local memory/file instead):", err);
@@ -1473,6 +1534,146 @@ app.post("/api/academy/auth/verify-otp", (req, res) => {
   });
 });
 
+// ==========================================
+// PAYMENT SETTINGS QR CODE MANAGEMENT ENDPOINTS
+// ==========================================
+
+// 1. Get Payment Settings (Accessible to visitors/students)
+app.get("/api/payment/settings", (req, res) => {
+  res.json(paymentSettings);
+});
+
+// 2. Update Payment Settings QR Code (Admin Only)
+app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: "Access denied. Admins only." });
+  }
+
+  const { image, fileName, mimeType } = req.body;
+  if (!image) {
+    return res.status(400).json({ error: "No image file provided." });
+  }
+
+  try {
+    // Parse base64
+    const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    let buffer: Buffer;
+    let finalMimeType = mimeType || 'image/png';
+
+    if (matches && matches.length === 3) {
+      finalMimeType = matches[1];
+      buffer = Buffer.from(matches[2], 'base64');
+    } else {
+      buffer = Buffer.from(image, 'base64');
+    }
+
+    // Check size (5MB limit)
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: "Image size exceeds the 5 MB limit." });
+    }
+
+    let fileUrl = '';
+    let uploadSuccess = false;
+
+    // Check if Firebase Storage is initialized and available
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        const firebaseAdmin = admin as any;
+        if (config.storageBucket && firebaseAdmin.apps?.length > 0) {
+          console.log("Uploading QR code to Firebase Storage bucket:", config.storageBucket);
+          const bucket = firebaseAdmin.storage().bucket(config.storageBucket);
+          const ext = finalMimeType.split('/')[1] || 'png';
+          const fileRef = bucket.file(`payment_qr_codes/qr_${Date.now()}.${ext}`);
+
+          const uuidToken = crypto.randomUUID();
+          await fileRef.save(buffer, {
+            metadata: {
+              contentType: finalMimeType,
+              cacheControl: 'public, max-age=31536000',
+              metadata: {
+                firebaseStorageDownloadTokens: uuidToken
+              }
+            }
+          });
+
+          // Generate the standard public web URL format for Firebase Storage download
+          fileUrl = `https://firebasestorage.googleapis.com/v0/b/${config.storageBucket}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
+
+          // Also attempt to get a far-future signed URL as an alternate highly robust format, if IAM permissions allow
+          try {
+            const [signedUrl] = await fileRef.getSignedUrl({
+              action: 'read',
+              expires: '03-01-2100'
+            });
+            fileUrl = signedUrl;
+          } catch (signedErr: any) {
+            console.warn("Could not generate signed URL (expected in sandbox without IAM signBlob), using standard media download token URL:", signedErr?.message || signedErr);
+          }
+
+          uploadSuccess = true;
+          console.log("Firebase Storage upload succeeded:", fileUrl);
+        }
+      } catch (storageErr) {
+        console.error("Firebase Storage upload failed, falling back to local storage:", storageErr);
+      }
+    }
+
+    // Fallback: save locally
+    if (!uploadSuccess) {
+      console.log("Falling back to saving QR Code locally...");
+      const ext = finalMimeType.split('/')[1] || 'png';
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const localFileName = `qr_${Date.now()}.${ext}`;
+      const localFilePath = path.join(uploadsDir, localFileName);
+      fs.writeFileSync(localFilePath, buffer);
+
+      // Also copy to dist/uploads if dist exists
+      const distPath = path.join(process.cwd(), 'dist');
+      if (fs.existsSync(distPath)) {
+        const distUploadsDir = path.join(distPath, 'uploads');
+        if (!fs.existsSync(distUploadsDir)) {
+          fs.mkdirSync(distUploadsDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(distUploadsDir, localFileName), buffer);
+      }
+
+      fileUrl = `/uploads/${localFileName}`;
+      console.log("Local fallback upload succeeded:", fileUrl);
+    }
+
+    paymentSettings.qrCodeUrl = fileUrl;
+    paymentSettings.updatedAt = new Date().toISOString();
+    saveDB();
+
+    res.json({ success: true, qrCodeUrl: fileUrl, updatedAt: paymentSettings.updatedAt });
+  } catch (err: any) {
+    console.error("Error handling QR upload:", err);
+    res.status(500).json({ error: "Failed to upload and save QR code: " + (err?.message || err) });
+  }
+});
+
+// 3. Delete Payment Settings QR Code (Admin Only, reverts to default)
+app.delete("/api/payment/settings", authenticateToken, (req: any, res: any) => {
+  if (req.user.role !== 'Admin') {
+    return res.status(403).json({ error: "Access denied. Admins only." });
+  }
+
+  try {
+    paymentSettings.qrCodeUrl = '';
+    paymentSettings.updatedAt = new Date().toISOString();
+    saveDB();
+    res.json({ success: true, message: "Payment QR code deleted. Reverted to default static QR code." });
+  } catch (err: any) {
+    console.error("Error deleting QR code settings:", err);
+    res.status(500).json({ error: "Failed to delete payment settings: " + (err?.message || err) });
+  }
+});
+
 // Endpoint: Admin Approve/Reject Payments
 app.post("/api/academy/admin/payments/action", (req, res) => {
   const { paymentId, action } = req.body;
@@ -1542,7 +1743,6 @@ app.post("/api/academy/admin/students/action", (req, res) => {
 // STUDENT AUTHENTICATION SYSTEM ENDPOINTS
 // ==========================================
 
-const JWT_SECRET = process.env.JWT_SECRET || 'pearls_secret_jwt_key_2026';
 
 // Middleware to authenticate student JWT
 function authenticateToken(req: any, res: any, next: any) {

@@ -7,7 +7,8 @@ import {
   Clock, ArrowLeft, AlertCircle, Trash2, Plus, Edit, ShieldAlert, 
   Volume2, VolumeX, Maximize2, Minimize2, Monitor, PenTool, Eraser, 
   RefreshCw, Play, CheckCircle2, Info, Star, MessageSquare, Bell, CreditCard,
-  Search, ShieldCheck, AlertTriangle, User, Lock, Unlock, Smartphone, Mail, MapPin, UserPlus
+  Search, ShieldCheck, AlertTriangle, User, Lock, Unlock, Smartphone, Mail, MapPin, UserPlus,
+  QrCode, Upload
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import LiveClasses from './LiveClasses';
@@ -222,7 +223,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const [whatsappLogsList, setWhatsappLogsList] = useState<any[]>([]);
 
   // Sub-tabs for the Admin Panel / Analytics view
-  const [adminSubTab, setAdminSubTab] = useState<'stats' | 'students' | 'payments' | 'whatsapp' | 'security'>('stats');
+  const [adminSubTab, setAdminSubTab] = useState<'stats' | 'students' | 'payments' | 'whatsapp' | 'security' | 'qrSettings'>('stats');
 
   // Search and filter states for Admin Student list
   const [adminStudentSearch, setAdminStudentSearch] = useState('');
@@ -255,6 +256,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const [showStudentDetailModal, setShowStudentDetailModal] = useState(false);
   const [adminResetPassField, setAdminResetPassField] = useState('');
   const [loadingStudentDetail, setLoadingStudentDetail] = useState(false);
+
+  // Dynamic QR Code Payment System states
+  const [paymentQrCodeUrl, setPaymentQrCodeUrl] = useState('');
+  const [paymentQrCodeUpdatedAt, setPaymentQrCodeUpdatedAt] = useState('');
 
   // Timers for OTP flows
   useEffect(() => {
@@ -293,14 +298,154 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     return () => clearInterval(interval);
   }, [loginOtpTimer]);
 
+  // Fetch dynamic payment Settings (QR Code)
+  const fetchPaymentSettings = async () => {
+    try {
+      const res = await fetch('/api/payment/settings');
+      if (res.ok) {
+        const data = await res.json();
+        setPaymentQrCodeUrl(data.qrCodeUrl || '');
+        setPaymentQrCodeUpdatedAt(data.updatedAt || '');
+      }
+    } catch (err) {
+      console.error("Error fetching payment settings:", err);
+    }
+  };
+
+  // QR Code Settings States
+  const [qrDragActive, setQrDragActive] = useState(false);
+  const [qrUploading, setQrUploading] = useState(false);
+  const [qrUploadProgress, setQrUploadProgress] = useState(0);
+  const [qrSelectedFile, setQrSelectedFile] = useState<File | null>(null);
+  const [qrFilePreview, setQrFilePreview] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [qrSuccess, setQrSuccess] = useState('');
+
+  const handleQrFileSelect = (file: File) => {
+    setQrError('');
+    setQrSuccess('');
+    
+    // File validation
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setQrError('Invalid file type. Please upload a PNG, JPG, JPEG, or WEBP image.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setQrError('File is too large. Maximum file size allowed is 5 MB.');
+      return;
+    }
+
+    setQrSelectedFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setQrFilePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleQrUploadSubmit = async () => {
+    if (!qrSelectedFile || !qrFilePreview) return;
+    
+    setQrUploading(true);
+    setQrUploadProgress(10);
+    setQrError('');
+    setQrSuccess('');
+
+    // progress interval simulation
+    const interval = setInterval(() => {
+      setQrUploadProgress((prev) => {
+        if (prev >= 90) {
+          clearInterval(interval);
+          return 90;
+        }
+        return prev + 15;
+      });
+    }, 120);
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/payment/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify({
+          image: qrFilePreview,
+          fileName: qrSelectedFile.name,
+          mimeType: qrSelectedFile.type
+        })
+      });
+
+      clearInterval(interval);
+      setQrUploadProgress(100);
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to upload QR Code');
+      }
+
+      setPaymentQrCodeUrl(data.qrCodeUrl);
+      setPaymentQrCodeUpdatedAt(data.updatedAt);
+      setQrSuccess('Payment QR Code successfully updated!');
+      setQrSelectedFile(null);
+      setQrFilePreview('');
+      showToast('Payment settings successfully updated!');
+    } catch (err: any) {
+      clearInterval(interval);
+      setQrError(err?.message || 'Failed to update payment settings.');
+    } finally {
+      setTimeout(() => {
+        setQrUploading(false);
+        setQrUploadProgress(0);
+      }, 400);
+    }
+  };
+
+  const handleQrDelete = async () => {
+    if (!window.confirm("Are you sure you want to remove the custom QR Code? This will revert to the default static QR Code.")) {
+      return;
+    }
+
+    setQrError('');
+    setQrSuccess('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/payment/settings', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : ''
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete custom QR Code');
+      }
+
+      setPaymentQrCodeUrl('');
+      setPaymentQrCodeUpdatedAt('');
+      setQrSuccess('Custom QR Code removed. Reverted to default static QR Code.');
+      showToast('Payment settings reverted to default!');
+    } catch (err: any) {
+      setQrError(err?.message || 'Failed to reset payment settings.');
+    }
+  };
+
   // Fetch full state from backend
   const fetchState = async (email?: string) => {
     setIsLoading(true);
     try {
+      await fetchPaymentSettings();
       const token = localStorage.getItem('token');
       const url = token ? '/api/academy/state' : `/api/academy/state?email=${encodeURIComponent(email || selectedRoleEmail || 'student@pearls.com')}`;
       const data = await apiFetch(url);
       if (data) {
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+        }
         setCurrentUser(data.user);
         setCourses(data.courses);
         setLiveSessions(data.liveClasses);
@@ -370,6 +515,20 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
 
   // Switch role instant swap helper
   const handleRoleSwap = async (email: string) => {
+    try {
+      const res = await fetch('/api/academy/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (data.success && data.token) {
+        localStorage.setItem('token', data.token);
+      }
+    } catch (e) {
+      console.error('Failed to update authentication token on role swap:', e);
+    }
+
     const targetUser = allUsers.find(u => u.email === email);
     if (targetUser && targetUser.role === 'Admin') {
       setSelectedRoleEmail(email);
@@ -1236,7 +1395,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
           {currentUser && localStorage.getItem('token') ? (
             <div className="flex items-center gap-2.5">
               <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 p-1.5 rounded-full pr-4 text-xs text-stone-300">
-                <img src={currentUser.avatar} className="w-6 h-6 rounded-full object-cover border border-[#D4AF37]/40" />
+                <img src={currentUser.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120'} className="w-6 h-6 rounded-full object-cover border border-[#D4AF37]/40" />
                 <div className="flex flex-col">
                   <span className="font-mono font-bold leading-none">{currentUser.name}</span>
                   <span className="text-[8px] font-mono text-[#D4AF37] uppercase tracking-wider mt-0.5">{currentUser.role} • {currentUser.studentId || 'N/A'}</span>
@@ -1295,7 +1454,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                   showToast(`Swapped to simulation: ${roleUser.role}`);
                 }}
                 className={`px-3 py-1.5 rounded-full font-mono text-[10px] uppercase tracking-wider transition-all cursor-pointer font-semibold ${
-                  selectedRoleEmail === roleUser.email && !localStorage.getItem('token')
+                  currentUser?.email === roleUser.email
                     ? 'bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black shadow-sm'
                     : 'text-stone-400 hover:text-white'
                 }`}
@@ -2060,17 +2219,37 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
               </button>
 
               {currentUser.role === 'Admin' && (
-                <button
-                  onClick={() => setActiveTab('analytics')}
-                  className={`flex-1 lg:flex-none flex items-center justify-center lg:justify-start gap-3 py-3 px-4 rounded-xl text-xs font-mono tracking-wider uppercase transition-all cursor-pointer ${
-                    activeTab === 'analytics'
-                      ? 'bg-[#111111] text-white shadow-sm'
-                      : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
-                  }`}
-                >
-                  <TrendingUp className="w-4 h-4 text-[#D4AF37]" />
-                  <span className="whitespace-nowrap">Analytical View</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      setActiveTab('analytics');
+                      setAdminSubTab('stats');
+                    }}
+                    className={`flex-1 lg:flex-none flex items-center justify-center lg:justify-start gap-3 py-3 px-4 rounded-xl text-xs font-mono tracking-wider uppercase transition-all cursor-pointer ${
+                      activeTab === 'analytics' && adminSubTab !== 'qrSettings'
+                        ? 'bg-[#111111] text-white shadow-sm'
+                        : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                    }`}
+                  >
+                    <TrendingUp className="w-4 h-4 text-[#D4AF37]" />
+                    <span className="whitespace-nowrap">Analytical View</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab('analytics');
+                      setAdminSubTab('qrSettings');
+                    }}
+                    className={`flex-1 lg:flex-none flex items-center justify-center lg:justify-start gap-3 py-3 px-4 rounded-xl text-xs font-mono tracking-wider uppercase transition-all cursor-pointer ${
+                      activeTab === 'analytics' && adminSubTab === 'qrSettings'
+                        ? 'bg-[#111111] text-white shadow-sm'
+                        : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4 text-[#D4AF37]" />
+                    <span className="whitespace-nowrap">Payment QR Settings</span>
+                  </button>
+                </>
               )}
             </nav>
           </div>
@@ -2122,6 +2301,32 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                       className="text-[#D4AF37] text-xs font-mono font-bold tracking-wider uppercase hover:underline cursor-pointer"
                     >
                       View Syllabus Schedule →
+                    </button>
+                  </div>
+                )}
+
+                {/* Quick Access QR Code Settings Card for Owner/Admin */}
+                {currentUser.role === 'Admin' && (
+                  <div className="bg-[#AA7C11]/5 border border-[#D4AF37]/25 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 animate-fadeIn">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-[#D4AF37]/10 flex items-center justify-center text-[#D4AF37] shrink-0">
+                        <QrCode className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-serif text-sm font-bold text-stone-900">Manage Admission Payments UPI QR Code</h4>
+                        <p className="text-stone-600 text-xs font-light mt-1">
+                          You are currently using <strong className="text-stone-800">{paymentQrCodeUrl ? 'a custom uploaded dynamic QR Code' : 'the default static fallback QR Code'}</strong>. Click to upload, replace, or reset.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setActiveTab('analytics');
+                        setAdminSubTab('qrSettings');
+                      }}
+                      className="bg-[#111111] hover:bg-[#D4AF37] text-white hover:text-black border border-stone-800 px-4 py-2.5 rounded-xl text-xs font-mono tracking-wider uppercase font-bold transition-all cursor-pointer shadow-sm shrink-0"
+                    >
+                      Manage QR Code →
                     </button>
                   </div>
                 )}
@@ -2479,12 +2684,14 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                             </div>
 
                             <div className="flex gap-4 p-3 bg-stone-50 rounded-2xl border border-stone-100 text-xs">
-                              <img
-                                src={sub.fileUrl}
-                                alt="Student upload"
-                                className="w-16 h-16 rounded-lg object-cover cursor-pointer border border-stone-200"
-                                onClick={() => window.open(sub.fileUrl, '_blank')}
-                              />
+                              {sub.fileUrl && (
+                                <img
+                                  src={sub.fileUrl}
+                                  alt="Student upload"
+                                  className="w-16 h-16 rounded-lg object-cover cursor-pointer border border-stone-200"
+                                  onClick={() => window.open(sub.fileUrl, '_blank')}
+                                />
+                              )}
                               <div className="space-y-1 font-light text-stone-600">
                                 <p><strong>Student:</strong> {sub.userName}</p>
                                 <p><strong>File Name:</strong> <span className="font-mono text-[10px]">{sub.fileName}</span></p>
@@ -2635,6 +2842,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                     { id: 'stats', label: 'Overview Metrics', icon: TrendingUp },
                     { id: 'students', label: 'Student Directory', icon: Users },
                     { id: 'payments', label: 'Payment Approvals', icon: CreditCard },
+                    { id: 'qrSettings', label: 'Payment QR Settings', icon: QrCode },
                     { id: 'whatsapp', label: 'WhatsApp Dispatch Logs', icon: MessageSquare },
                     { id: 'security', label: 'Login Audit Trail', icon: ShieldCheck }
                   ].map((btn) => {
@@ -3101,6 +3309,222 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                     </div>
                   </div>
                 )}
+
+                {/* SUBTAB 6: PAYMENT QR SETTINGS (Admin Only) */}
+                {adminSubTab === 'qrSettings' && (
+                  <div className="space-y-6 animate-fadeIn text-[#111111]">
+                    <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-6">
+                      
+                      {/* Header with Title and Info */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
+                        <div>
+                          <h4 className="font-serif text-base font-bold text-stone-900">Payment Settings & QR Code</h4>
+                          <p className="text-stone-500 text-xs font-light mt-0.5">
+                            Upload, replace, preview, or delete the dynamic UPI QR Code displayed on student checkout screens.
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-mono tracking-wider text-amber-700 bg-amber-50 border border-amber-200/50 px-3 py-1 rounded-full uppercase font-bold">
+                          Durable Cloud Store
+                        </span>
+                      </div>
+
+                      {/* Content Grid */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        
+                        {/* Column 1: Live Preview (lg:span-5) */}
+                        <div className="lg:col-span-5 space-y-4">
+                          <h5 className="font-mono text-[10px] uppercase tracking-wider text-stone-400">Live Student Checkout Preview</h5>
+                          
+                          {/* Simulated Device Frame */}
+                          <div className="border border-stone-200 rounded-3xl p-6 bg-stone-50 shadow-inner relative overflow-hidden flex flex-col items-center justify-center min-h-[340px]">
+                            {/* Device camera notch accent */}
+                            <div className="w-16 h-4 bg-stone-300/40 rounded-full absolute top-2 mx-auto" />
+                            
+                            <div className="w-full max-w-[220px] mt-4 bg-gradient-to-b from-[#111111] to-stone-900 text-white rounded-2xl p-4 border border-[#D4AF37]/30 text-center space-y-4 shadow-md">
+                              <span className="bg-amber-100/10 text-[#D4AF37] text-[8px] font-mono font-bold tracking-widest uppercase px-2 py-0.5 rounded-full border border-[#D4AF37]/20">
+                                {paymentQrCodeUrl ? 'Dynamic Active QR' : 'Default Static Fallback'}
+                              </span>
+                              
+                              <div className="bg-white p-2.5 rounded-xl inline-block mx-auto shadow-md">
+                                <img 
+                                  src={paymentQrCodeUrl || "/src/assets/images/pratibha_ingole_1783095676300.jpg"} 
+                                  alt="UPI Payment QR Code Preview" 
+                                  className="w-32 h-32 object-contain mx-auto rounded-lg"
+                                  referrerPolicy="no-referrer"
+                                  key={paymentQrCodeUrl}
+                                />
+                              </div>
+
+                              <div className="space-y-1 font-mono text-[8px]">
+                                <div className="flex justify-between px-1 text-stone-400">
+                                  <span>Merchant VPA:</span>
+                                  <span className="text-white font-bold">pearlsacademy@upi</span>
+                                </div>
+                                <div className="flex justify-between px-1 text-stone-400">
+                                  <span>Amount:</span>
+                                  <span className="text-[#D4AF37] font-bold">₹[Course Price]</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Info card underneath preview */}
+                            <div className="mt-4 text-center space-y-1 px-2">
+                              <span className="text-[10px] font-mono text-stone-500 block font-semibold">
+                                {paymentQrCodeUrl ? 'Source: Firebase Storage' : 'Source: Hardcoded Static Asset'}
+                              </span>
+                              {paymentQrCodeUpdatedAt && (
+                                <span className="text-[9px] font-mono text-stone-400 block">
+                                  Last synchronized: {new Date(paymentQrCodeUpdatedAt).toLocaleString()}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Column 2: Upload Actions (lg:span-7) */}
+                        <div className="lg:col-span-7 space-y-6">
+                          <h5 className="font-mono text-[10px] uppercase tracking-wider text-stone-400">Manage QR Code Image</h5>
+
+                          <div className="space-y-4">
+                            {/* Drag & Drop Zone */}
+                            <div 
+                              onDragOver={(e) => { e.preventDefault(); setQrDragActive(true); }}
+                              onDragLeave={() => setQrDragActive(false)}
+                              onDrop={async (e) => {
+                                e.preventDefault();
+                                setQrDragActive(false);
+                                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                  handleQrFileSelect(e.dataTransfer.files[0]);
+                                }
+                              }}
+                              className={`border-2 border-dashed rounded-3xl p-8 text-center transition-all relative ${
+                                qrDragActive 
+                                  ? 'border-[#AA7C11] bg-amber-50/20 scale-[0.99]' 
+                                  : 'border-stone-200 hover:border-stone-300 bg-stone-50/50'
+                              }`}
+                            >
+                              <input 
+                                type="file" 
+                                id="qr-file-upload" 
+                                className="hidden" 
+                                accept="image/png, image/jpeg, image/jpg, image/webp"
+                                onChange={(e) => {
+                                  if (e.target.files && e.target.files[0]) {
+                                    handleQrFileSelect(e.target.files[0]);
+                                  }
+                                }}
+                              />
+                              
+                              <label htmlFor="qr-file-upload" className="cursor-pointer space-y-3 block">
+                                <div className="w-12 h-12 bg-[#AA7C11]/10 rounded-full flex items-center justify-center mx-auto text-[#AA7C11]">
+                                  <Upload className="w-6 h-6" />
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-stone-800">
+                                    Drag & drop your QR image here, or <span className="text-[#AA7C11] underline">browse files</span>
+                                  </p>
+                                  <p className="text-[10px] text-stone-500 font-light">
+                                    Supports PNG, JPG, JPEG, WEBP up to 5 MB
+                                  </p>
+                                </div>
+                              </label>
+
+                              {/* Uploading overlay */}
+                              {qrUploading && (
+                                <div className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center space-y-3 z-10">
+                                  <RefreshCw className="w-8 h-8 text-[#AA7C11] animate-spin" />
+                                  <div className="text-center space-y-1">
+                                    <p className="text-xs font-bold text-stone-800">Uploading Payment QR...</p>
+                                    <p className="text-[10px] text-stone-500 font-mono">Progress: {qrUploadProgress}%</p>
+                                  </div>
+                                  <div className="w-48 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                                    <div 
+                                      className="h-full bg-gradient-to-r from-[#AA7C11] to-[#D4AF37] transition-all duration-300" 
+                                      style={{ width: `${qrUploadProgress}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Preview Selected File Card */}
+                            {qrSelectedFile && qrFilePreview && (
+                              <div className="bg-amber-50/30 border border-[#D4AF37]/20 rounded-2xl p-4 flex items-center justify-between gap-4 animate-fadeIn">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 bg-white border border-stone-200 rounded-xl overflow-hidden p-1 flex items-center justify-center">
+                                    <img 
+                                      src={qrFilePreview} 
+                                      alt="Selected preview" 
+                                      className="max-w-full max-h-full object-contain" 
+                                    />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold text-stone-800 truncate max-w-[180px]">{qrSelectedFile.name}</p>
+                                    <p className="text-[10px] text-stone-500 font-mono">
+                                      {(qrSelectedFile.size / 1024 / 1024).toFixed(2)} MB
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    onClick={() => {
+                                      setQrSelectedFile(null);
+                                      setQrFilePreview('');
+                                    }}
+                                    className="p-1.5 hover:bg-stone-100 rounded-full text-stone-500 hover:text-red-600 transition-colors cursor-pointer"
+                                    title="Cancel"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={handleQrUploadSubmit}
+                                    className="bg-[#AA7C11] hover:bg-[#D4AF37] text-white hover:text-black px-3 py-1.5 rounded-lg text-[10px] font-mono uppercase tracking-wider font-bold transition-all cursor-pointer"
+                                  >
+                                    Upload & Save
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Messages & Actions */}
+                            {qrError && (
+                              <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-2xl text-xs flex items-center gap-2">
+                                <AlertCircle className="w-4 h-4 shrink-0" />
+                                <span>{qrError}</span>
+                              </div>
+                            )}
+
+                            {qrSuccess && (
+                              <div className="bg-green-50 border border-green-200 text-green-700 p-3.5 rounded-2xl text-xs flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                                <span>{qrSuccess}</span>
+                              </div>
+                            )}
+
+                            {/* Delete/Restore Button if QR Code exists */}
+                            {paymentQrCodeUrl && (
+                              <div className="pt-4 border-t border-stone-100 flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                  <p className="text-xs font-bold text-stone-800">Durable Cloud Mode</p>
+                                  <p className="text-[10px] text-stone-500 font-light">Custom payment QR Code is active across all channels.</p>
+                                </div>
+                                <button
+                                  onClick={handleQrDelete}
+                                  className="border border-red-200 hover:border-red-600 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl text-[10px] font-mono uppercase tracking-wider font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Remove & Reset</span>
+                                </button>
+                              </div>
+                            )}
+
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3367,7 +3791,9 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                 // Step 2: Display QR Code & Collect UTR
                 <form onSubmit={handleEnrollSubmitUtr} className="space-y-5 text-xs">
                   <div className="text-center space-y-1.5">
-                    <span className="bg-amber-100 text-amber-800 text-[9px] font-mono font-bold tracking-widest uppercase px-3 py-0.5 rounded-full">Static UPI QR Code Entry</span>
+                    <span className="bg-amber-100 text-amber-800 text-[9px] font-mono font-bold tracking-widest uppercase px-3 py-0.5 rounded-full">
+                      {paymentQrCodeUrl ? 'Dynamic UPI QR Code' : 'Static UPI QR Code Entry'}
+                    </span>
                     <h5 className="font-serif text-sm font-bold text-stone-900">Scan & Pay ₹{checkoutCourse.price.toLocaleString()}</h5>
                   </div>
 
@@ -3377,7 +3803,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
                     
                     <div className="bg-white p-3 rounded-2xl inline-block mx-auto shadow-md">
                       <img 
-                        src="/src/assets/images/pratibha_ingole_1783095676300.jpg" 
+                        src={paymentQrCodeUrl || "/src/assets/images/pratibha_ingole_1783095676300.jpg"} 
                         alt="P.R. Ingole UPI QR Code" 
                         className="w-44 h-44 object-contain mx-auto rounded-xl"
                         referrerPolicy="no-referrer"
