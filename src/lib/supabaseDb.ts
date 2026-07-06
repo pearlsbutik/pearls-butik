@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from "./supabase";
 const tableCheckCache: Record<string, boolean> = {};
 
 // Helper to check if a specific table exists in Supabase
-async function tableExists(tableName: string): Promise<boolean> {
+export async function tableExists(tableName: string): Promise<boolean> {
   if (tableCheckCache[tableName] !== undefined) {
     return tableCheckCache[tableName];
   }
@@ -15,7 +15,6 @@ async function tableExists(tableName: string): Promise<boolean> {
       .select("*")
       .limit(1);
     
-    // If table doesn't exist, PostgREST usually returns 404 or a specific error code
     if (error && (error.code === "PGRST116" || error.message.includes("does not exist") || error.code === "42P01")) {
       tableCheckCache[tableName] = false;
       return false;
@@ -28,11 +27,50 @@ async function tableExists(tableName: string): Promise<boolean> {
   }
 }
 
-// Ensure the unified/fallback table "pearls_db" is ready to store backup documents
-async function ensureFallbackTable(): Promise<void> {
-  // If we can execute SQL, that's great, but since we cannot run arbitrary SQL, 
-  // we will rely on Supabase's automatic schema or pre-existing setup.
-  // If "pearls_db" doesn't exist, we will log instructions on how to create it.
+// Maps client-side structures to standard PostgreSQL schema columns where appropriate
+function mapToPostgresRow(tableName: string, item: any): any {
+  // Common mapping helper
+  const now = new Date().toISOString();
+  
+  if (tableName === "students") {
+    return {
+      id: item.id || `st-${Math.floor(1000 + Math.random() * 9000)}`,
+      full_name: item.name || item.fullName || "",
+      email: item.email || "",
+      phone_number: item.phone || item.phoneNumber || "",
+      whatsapp_number: item.whatsapp || item.whatsappNumber || item.phone || "",
+      password_hash: item.passwordHash || "",
+      city: item.city || "",
+      state: item.state || "",
+      date_of_birth: item.dob || item.dateOfBirth || "",
+      gender: item.gender || "",
+      profile_photo_url: item.avatar || item.profilePhotoUrl || "",
+      referral_code: item.referralCode || "",
+      is_verified: item.active === true || item.isVerified === true,
+      created_at: item.createdAt || now,
+      updated_at: item.updatedAt || now,
+      last_login: item.lastLogin || now,
+      account_status: item.active ? "active" : "inactive"
+    };
+  }
+
+  if (tableName === "admins") {
+    return {
+      id: item.id || `ad-${Math.floor(1000 + Math.random() * 9000)}`,
+      full_name: item.name || "",
+      email: item.email || "",
+      phone_number: item.phone || "",
+      password_hash: item.passwordHash || "",
+      created_at: item.createdAt || now,
+      updated_at: item.updatedAt || now
+    };
+  }
+
+  // Fallback / simple mappings
+  return {
+    id: item.id || item.email || `id-${Math.floor(Math.random() * 1000000)}`,
+    data: item
+  };
 }
 
 export async function loadDatabaseState(targets: { key: string; target: any[] }[]): Promise<boolean> {
@@ -42,14 +80,72 @@ export async function loadDatabaseState(targets: { key: string; target: any[] }[
 
   for (const col of targets) {
     try {
-      // 1. Map Firestore collection key to table name (PostgreSQL conventions)
+      // 1. Map key to table name (PostgreSQL conventions)
       const tableName = col.key.replace(/([A-Z])/g, "_$1").toLowerCase(); // e.g. academyUsers -> academy_users
       
       let items: any[] = [];
       let loaded = false;
 
+      // Special mapping for students/admins to split up academyUsers
+      if (col.key === "academyUsers") {
+        const hasStudentsTable = await tableExists("students");
+        const hasAdminsTable = await tableExists("admins");
+        const hasUsersTable = await tableExists("academy_users");
+
+        if (hasStudentsTable || hasAdminsTable) {
+          let students: any[] = [];
+          let admins: any[] = [];
+
+          if (hasStudentsTable) {
+            const { data, error } = await supabaseAdmin.from("students").select("*");
+            if (!error && data) {
+              students = data.map(row => ({
+                id: row.id,
+                name: row.full_name,
+                email: row.email,
+                phone: row.phone_number,
+                whatsapp: row.whatsapp_number,
+                passwordHash: row.password_hash,
+                city: row.city,
+                state: row.state,
+                dob: row.date_of_birth,
+                gender: row.gender,
+                avatar: row.profile_photo_url,
+                referralCode: row.referral_code,
+                active: row.is_verified || row.account_status === "active",
+                role: "Student",
+                studentId: row.id.startsWith("PE") ? row.id : `PE-2026-${row.id.replace(/\D/g, '').substring(0, 4) || '1001'}`
+              }));
+              console.log(`Supabase: Restored ${students.length} students from 'students' table.`);
+            }
+          }
+
+          if (hasAdminsTable) {
+            const { data, error } = await supabaseAdmin.from("admins").select("*");
+            if (!error && data) {
+              admins = data.map(row => ({
+                id: row.id,
+                name: row.full_name,
+                email: row.email,
+                phone: row.phone_number,
+                passwordHash: row.password_hash,
+                role: "Admin",
+                active: true,
+                studentId: "PE-ADMIN-01"
+              }));
+              console.log(`Supabase: Restored ${admins.length} admins from 'admins' table.`);
+            }
+          }
+
+          items = [...admins, ...students];
+          if (items.length > 0) {
+            loaded = true;
+          }
+        }
+      }
+
       // Try specific table first if it exists
-      if (await tableExists(tableName)) {
+      if (!loaded && await tableExists(tableName)) {
         console.log(`Supabase: Table '${tableName}' exists. Fetching rows...`);
         const { data, error } = await supabaseAdmin
           .from(tableName)
@@ -103,13 +199,44 @@ export async function saveDatabaseState(collections: { key: string; data: any[] 
       const tableName = col.key.replace(/([A-Z])/g, "_$1").toLowerCase();
       let saved = false;
 
-      // 1. Try to save to specific table first
-      if (await tableExists(tableName)) {
-        // Clear old rows to keep in-sync (since it's a full baseline override sync)
+      // 1. Special handling to split up academyUsers into explicit students/admins tables
+      if (col.key === "academyUsers") {
+        const hasStudentsTable = await tableExists("students");
+        const hasAdminsTable = await tableExists("admins");
+
+        if (hasStudentsTable || hasAdminsTable) {
+          const students = col.data.filter(u => u.role === "Student");
+          const admins = col.data.filter(u => u.role === "Admin");
+
+          if (hasStudentsTable && students.length > 0) {
+            const mappedStudents = students.map(s => mapToPostgresRow("students", s));
+            const { error } = await supabaseAdmin.from("students").upsert(mappedStudents);
+            if (!error) {
+              console.log(`Supabase: Saved ${students.length} students directly to 'students' table.`);
+              saved = true;
+            } else {
+              console.warn("Supabase: Error saving to 'students' table, falling back:", error.message);
+            }
+          }
+
+          if (hasAdminsTable && admins.length > 0) {
+            const mappedAdmins = admins.map(a => mapToPostgresRow("admins", a));
+            const { error } = await supabaseAdmin.from("admins").upsert(mappedAdmins);
+            if (!error) {
+              console.log(`Supabase: Saved ${admins.length} admins directly to 'admins' table.`);
+              saved = true;
+            } else {
+              console.warn("Supabase: Error saving to 'admins' table, falling back:", error.message);
+            }
+          }
+        }
+      }
+
+      // Try specific table if it exists
+      if (!saved && await tableExists(tableName)) {
         await supabaseAdmin.from(tableName).delete().neq("id", "0_dummy_id_clear");
 
         if (col.data.length > 0) {
-          // Format records to rows. If the table is structured as id & data jsonb, we can upsert easily
           const rows = col.data.map((item, idx) => {
             const itemId = item.id || item.email || item.userEmail || `id-${idx}-${Date.now()}`;
             return { id: itemId, data: item };
@@ -126,7 +253,7 @@ export async function saveDatabaseState(collections: { key: string; data: any[] 
             console.warn(`Supabase: Failed to save to table '${tableName}', falling back:`, error.message);
           }
         } else {
-          saved = true; // empty, cleared successfully
+          saved = true;
         }
       }
 

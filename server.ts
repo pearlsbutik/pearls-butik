@@ -1589,8 +1589,8 @@ function authenticateToken(req: any, res: any, next: any) {
   });
 }
 
-// 1. Sign Up
-app.post("/api/auth/signup", (req, res) => {
+// 1. Sign Up & Register (Student Account Creation)
+const handleStudentRegistration = (req: express.Request, res: express.Response) => {
   const { 
     name, email, phone, whatsapp, password, city, state, dob, gender, avatar, referralCode 
   } = req.body;
@@ -1605,12 +1605,12 @@ app.post("/api/auth/signup", (req, res) => {
     return res.status(400).json({ error: "Email is already registered. Please login instead." });
   }
 
-  const existingPhone = academyUsers.find(u => u.phone === phone);
+  const existingPhone = academyUsers.find(u => u.phone === phone || (u as any).phone_number === phone);
   if (existingPhone) {
     return res.status(400).json({ error: "Phone number is already registered. Please login instead." });
   }
 
-  // Hash password
+  // Hash password using bcrypt
   const passwordHash = bcrypt.hashSync(password, 10);
 
   // Generate OTP
@@ -1625,7 +1625,7 @@ app.post("/api/auth/signup", (req, res) => {
     createdAt: Date.now()
   });
 
-  // Log WhatsApp
+  // Log WhatsApp message
   const waMessage = `Welcome to Pearls Academy!\nYour verification OTP is ${otp}. Please enter this to activate your account.`;
   whatsappLogs.unshift({
     id: `wal-${Math.floor(Math.random() * 10000)}`,
@@ -1636,28 +1636,43 @@ app.post("/api/auth/signup", (req, res) => {
     timestamp: new Date().toLocaleString()
   });
 
-  // Register unverified student
+  // Generate sequential/formatted Student ID matching standard branding
   const studentCount = academyUsers.filter(u => u.role === 'Student').length;
   const seq = String(studentCount + 1).padStart(4, '0');
   const studentId = `PE-2026-${seq}`;
 
+  // Unique UUID
+  const uuid = crypto.randomUUID();
+
+  // Save all fields compliant with 'students' PostgreSQL table & frontend schema
   const newUser = {
-    id: `u-${Math.floor(1000 + Math.random() * 9000)}`,
+    id: uuid,
     email,
     name,
     role: 'Student' as const,
     avatar: avatar || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
     phone,
+    phone_number: phone,
     whatsapp: whatsapp || phone,
+    whatsapp_number: whatsapp || phone,
     city: city || '',
     state: state || '',
     dob: dob || '',
+    date_of_birth: dob || '',
     gender: gender || '',
+    profile_photo_url: avatar || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
     referralCode: referralCode || '',
+    referral_code: referralCode || '',
     passwordHash,
+    password_hash: passwordHash,
     studentId,
     active: false, // Inactive until verified
-    batch: 'All Batches'
+    is_verified: false,
+    batch: 'All Batches',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    last_login: new Date().toISOString(),
+    account_status: 'inactive'
   };
 
   academyUsers.push(newUser);
@@ -1669,7 +1684,10 @@ app.post("/api/auth/signup", (req, res) => {
     simulatedOtp: otp,
     phone
   });
-});
+};
+
+app.post("/api/auth/signup", handleStudentRegistration);
+app.post("/api/auth/register", handleStudentRegistration);
 
 // 2. Login
 app.post("/api/auth/login", (req, res) => {
@@ -1700,19 +1718,19 @@ app.post("/api/auth/login", (req, res) => {
   }
 
   if (!emailOrPhone || !password) {
-    return res.status(400).json({ error: "Email/Phone and Password are required." });
+    return res.status(400).json({ error: "Phone number and Password are required." });
   }
 
-  // Find user by email or phone
-  const user = academyUsers.find(u => u.email === emailOrPhone || u.phone === emailOrPhone);
+  // Find student by phone_number (phone) or email
+  const user = academyUsers.find(u => u.phone === emailOrPhone || u.phone_number === emailOrPhone || u.email === emailOrPhone);
   if (!user || !(user as any).passwordHash) {
-    return res.status(400).json({ error: "Invalid credentials. Please try again." });
+    return res.status(400).json({ error: "Invalid phone number or password." });
   }
 
-  // Compare password
+  // Compare hashed password with bcrypt
   const passwordMatch = bcrypt.compareSync(password, (user as any).passwordHash);
   if (!passwordMatch) {
-    return res.status(400).json({ error: "Invalid credentials. Please try again." });
+    return res.status(400).json({ error: "Invalid phone number or password." });
   }
 
   // Check verification
@@ -1808,6 +1826,9 @@ const verifyStudentOtp = (req: express.Request, res: express.Response) => {
   const user = academyUsers.find(u => u.phone === phone);
   if (user) {
     user.active = true;
+    (user as any).is_verified = true;
+    (user as any).account_status = 'active';
+    (user as any).updated_at = new Date().toISOString();
     
     // Add Welcome notification
     notifications.unshift({
