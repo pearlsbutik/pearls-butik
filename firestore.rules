@@ -1,9 +1,0 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /pearls_db/{document} {
-      // Direct access is disabled. All clients must interact via server-side Express API endpoints.
-      allow read, write: if true;
-    }
-  }
-}

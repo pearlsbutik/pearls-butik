@@ -7,17 +7,26 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import crypto from "crypto";
-import { Firestore as GoogleFirestore } from "@google-cloud/firestore";
-import { Firestore as firestoreInstance, admin } from "./firebaseAdmin";
+import { supabase, getSupabaseAdmin, SUPABASE_STORAGE_BUCKET } from "./src/lib/supabase";
+import { loadDatabaseState, saveDatabaseState, loadPaymentSettings, savePaymentSettings } from "./src/lib/supabaseDb";
 
 dotenv.config();
 
-// Initialize Firestore dynamically using the shared initialization
-let firestore: any = null;
+// Initialize and verify Supabase dynamically on start
+let supabaseDbReady = false;
 try {
-  firestore = firestoreInstance;
+  const adminClient = getSupabaseAdmin();
+  if (adminClient) {
+    supabaseDbReady = true;
+    console.log("✅ Supabase Client initialized");
+    console.log("✅ Supabase Database connected");
+    console.log("✅ Supabase Storage connected");
+    console.log(`Project URL: ${process.env.SUPABASE_URL || "https://zxjtvgxoaattkajdwkxy.supabase.co"}`);
+    console.log(`Storage Bucket: ${SUPABASE_STORAGE_BUCKET}`);
+  }
 } catch (err: any) {
-  console.error("Failed to initialize Firestore Node.js SDK, relying on local backup file:", err?.message || err);
+  console.error("❌ Supabase Admin Initialization Failed!");
+  console.error("Exact reason:", err?.message || err);
 }
 
 const app = express();
@@ -520,8 +529,8 @@ function saveDB() {
     console.error("Error saving local database file:", err);
   }
 
-  // Asynchronously back up to Firestore in the background
-  if (firestore) {
+  // Asynchronously back up to Supabase in the background
+  if (supabaseDbReady) {
     const collectionsToSave = [
       { key: 'subscribers', data: subscribers },
       { key: 'academyUsers', data: academyUsers },
@@ -542,34 +551,16 @@ function saveDB() {
       { key: 'liveClassJoins', data: liveClassJoins }
     ];
 
-    const savePromises: Promise<any>[] = collectionsToSave.map(col => {
-      if (!Array.isArray(col.data)) {
-        console.error(`Validation failed for collection ${col.key}: data is not an array.`);
-        return Promise.resolve();
-      }
-
-      const cleanData = sanitizeFirestoreData(col.data);
-      const docRef = firestore.collection('pearls_db').doc(col.key);
-      return docRef.set({
-        items: cleanData,
-        updatedAt: new Date().toISOString()
-      }).catch(err => {
-        console.error(`Error backup-saving ${col.key} to Firestore:`, err);
+    saveDatabaseState(collectionsToSave)
+      .then(() => {
+        return savePaymentSettings(paymentSettings);
+      })
+      .then(() => {
+        console.log("Supabase background backup completed successfully.");
+      })
+      .catch(err => {
+        console.error("Error in Supabase background backup process:", err);
       });
-    });
-
-    // Also back up paymentSettings to Firestore
-    const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
-    const settingsPromise = settingsDocRef.set(sanitizeFirestoreData(paymentSettings)).catch(err => {
-      console.error("Error backup-saving paymentSettings to Firestore:", err);
-    });
-    savePromises.push(settingsPromise);
-
-    Promise.all(savePromises).then(() => {
-      console.log("Firestore background backup completed successfully.");
-    }).catch(err => {
-      console.error("Error in background backup process:", err);
-    });
   }
 }
 
@@ -615,10 +606,10 @@ async function loadDB() {
     console.error("Error loading baseline local database file:", err);
   }
 
-  // 2. Synchronize/restore with durable, permanent database from Firestore
-  if (firestore) {
+  // 2. Synchronize/restore with durable, permanent database from Supabase
+  if (supabaseDbReady) {
     try {
-      console.log("Attempting to restore database state from Google Cloud Firestore...");
+      console.log("Attempting to restore database state from Supabase PostgreSQL...");
       const collectionsToLoad = [
         { key: 'subscribers', target: subscribers },
         { key: 'academyUsers', target: academyUsers },
@@ -639,64 +630,23 @@ async function loadDB() {
         { key: 'liveClassJoins', target: liveClassJoins }
       ];
 
-      // Connection verification with dynamic database fallback
-      try {
-        const testDocRef = firestore.collection('pearls_db').doc('subscribers');
-        await testDocRef.get();
-      } catch (testErr: any) {
-        const isPermissionOrNotFound = testErr?.code === 7 || testErr?.code === 5 || testErr?.message?.includes('permission') || testErr?.message?.includes('Permission') || testErr?.message?.includes('NOT_FOUND');
-        if (isPermissionOrNotFound) {
-          console.warn("Access denied or not found on custom Firestore database. Falling back to default database...");
-          const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-          if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            firestore = new GoogleFirestore({
-              projectId: config.projectId
-            });
-            console.log("Re-initialized Firestore using the default database.");
-          }
-        } else {
-          throw testErr;
-        }
+      await loadDatabaseState(collectionsToLoad);
+
+      // Restore paymentSettings from Supabase
+      const settings = await loadPaymentSettings();
+      if (settings) {
+        paymentSettings = {
+          qrCodeUrl: settings.qrCodeUrl || '',
+          updatedAt: settings.updatedAt || ''
+        };
+        console.log("Restored paymentSettings from Supabase:", paymentSettings);
+      } else {
+        console.log("Table 'paymentSettings' does not exist in Supabase yet. It will be created on the next saveDB().");
       }
 
-      for (const col of collectionsToLoad) {
-        const docRef = firestore.collection('pearls_db').doc(col.key);
-        const docSnap = await docRef.get();
-        if (docSnap.exists) {
-          const docData = docSnap.data();
-          if (docData && Array.isArray(docData.items)) {
-            col.target.splice(0, col.target.length, ...docData.items);
-            console.log(`Restored table '${col.key}' from Firestore. Rows count: ${col.target.length}`);
-          }
-        } else {
-          console.log(`Table '${col.key}' does not exist in Firestore yet. It will be created on the next saveDB().`);
-        }
-      }
-
-      // Restore paymentSettings from Firestore
-      try {
-        const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
-        const settingsSnap = await settingsDocRef.get();
-        if (settingsSnap.exists) {
-          const docData = settingsSnap.data();
-          if (docData) {
-            paymentSettings = {
-              qrCodeUrl: docData.qrCodeUrl || '',
-              updatedAt: docData.updatedAt || ''
-            };
-            console.log("Restored paymentSettings from Firestore:", paymentSettings);
-          }
-        } else {
-          console.log("Table 'paymentSettings' does not exist in Firestore yet. It will be created on the next saveDB().");
-        }
-      } catch (settingsErr) {
-        console.error("Error restoring paymentSettings from Firestore:", settingsErr);
-      }
-
-      console.log("Successfully synchronized all data from Firestore!");
-    } catch (err) {
-      console.error("Error restoring database from Firestore (will use local memory/file instead):", err);
+      console.log("Successfully synchronized all data from Supabase!");
+    } catch (err: any) {
+      console.error("Error restoring database from Supabase (will use local memory/file instead):", err?.message || err);
     }
   }
 
@@ -1470,30 +1420,48 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
     }
 
     let fileUrl = '';
-    const { getStorage } = await import("firebase-admin/storage");
-    const bucket = getStorage().bucket();
-    if (!bucket) {
-      throw new Error("Firebase Storage bucket is missing or could not be retrieved from getStorage().bucket().");
+    const adminClient = getSupabaseAdmin();
+    const bucketName = SUPABASE_STORAGE_BUCKET;
+
+    console.log("Uploading QR code to Supabase Storage bucket:", bucketName);
+    const ext = finalMimeType.split('/')[1] || 'png';
+    const filePath = `payment-qr/qr_${Date.now()}.${ext}`;
+
+    // Clean up old file if it exists
+    if (paymentSettings.qrCodeUrl && paymentSettings.qrCodeUrl.includes(bucketName)) {
+      try {
+        const parts = paymentSettings.qrCodeUrl.split(`/public/${bucketName}/`);
+        if (parts.length === 2) {
+          const oldFilePath = decodeURIComponent(parts[1]);
+          console.log("Deleting old QR file from Supabase Storage:", oldFilePath);
+          await adminClient.storage.from(bucketName).remove([oldFilePath]);
+        }
+      } catch (delErr) {
+        console.warn("Could not delete old QR file from storage:", delErr);
+      }
     }
 
-    console.log("Uploading QR code to Firebase Storage bucket:", bucket.name);
-    const ext = finalMimeType.split('/')[1] || 'png';
-    const fileRef = bucket.file(`payment_qr_codes/qr_${Date.now()}.${ext}`);
-
-    const uuidToken = crypto.randomUUID();
-    await fileRef.save(buffer, {
-      metadata: {
+    const { data: uploadData, error: uploadError } = await adminClient
+      .storage
+      .from(bucketName)
+      .upload(filePath, buffer, {
         contentType: finalMimeType,
-        cacheControl: 'public, max-age=31536000',
-        metadata: {
-          firebaseStorageDownloadTokens: uuidToken
-        }
-      }
-    });
+        cacheControl: '31536000',
+        upsert: true
+      });
 
-    // Generate the standard permanent public download URL format
-    fileUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
-    console.log("Firebase Storage upload succeeded:", fileUrl);
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = adminClient
+      .storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    fileUrl = publicUrl;
+    console.log("Supabase Storage upload succeeded:", fileUrl);
 
     paymentSettings.qrCodeUrl = fileUrl;
     paymentSettings.updatedAt = new Date().toISOString();
@@ -1501,24 +1469,18 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
     // Save locally
     saveDB();
 
-    // Direct save to Firestore to guarantee immediate consistency and persistence
-    if (firestore) {
-      try {
-        const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
-        await settingsDocRef.set({
-          qrCodeUrl: fileUrl,
-          updatedAt: paymentSettings.updatedAt
-        });
-        console.log("Saved paymentSettings to Firestore successfully.");
-      } catch (fsErr: any) {
-        console.error("Error saving paymentSettings directly to Firestore:", fsErr);
-      }
+    // Direct save to Supabase database to guarantee immediate consistency and persistence
+    try {
+      await savePaymentSettings(paymentSettings);
+      console.log("Saved paymentSettings to Supabase database successfully.");
+    } catch (dbErr: any) {
+      console.error("Error saving paymentSettings to Supabase database:", dbErr);
     }
 
     res.json({ success: true, qrCodeUrl: fileUrl, updatedAt: paymentSettings.updatedAt });
   } catch (err: any) {
-    console.error("Error handling QR upload to Firebase Storage:", err);
-    res.status(500).json({ error: "Failed to upload QR code to Firebase Storage: " + (err?.message || err) });
+    console.error("Error handling QR upload to Supabase Storage:", err);
+    res.status(500).json({ error: "Failed to upload QR code to Supabase Storage: " + (err?.message || err) });
   }
 });
 
