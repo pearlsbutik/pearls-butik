@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Scissors, Palette, Compass, GraduationCap, Quote, RefreshCw } from 'lucide-react';
 import { StylistResponse } from '../types';
+import { resolveApiUrl } from '../lib/api';
 
 export default function AiStylist() {
   const [occasion, setOccasion] = useState('Bridal Collection');
@@ -59,7 +60,7 @@ export default function AiStylist() {
     }, 1200);
 
     try {
-      const response = await fetch('/api/consultation', {
+      const response = await fetch(resolveApiUrl('/api/consultation'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

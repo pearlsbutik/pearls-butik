@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Phone, Mail, MapPin, Calendar, Clock, CheckCircle2, MessageSquare, Compass, Award } from 'lucide-react';
+import { resolveApiUrl } from '../lib/api';
 
 interface ContactSectionProps {
   initialServicePreset?: string;
@@ -38,7 +39,7 @@ export default function ContactSection({ initialServicePreset = '' }: ContactSec
     setError('');
 
     try {
-      const response = await fetch('/api/appointment', {
+      const response = await fetch(resolveApiUrl('/api/appointment'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

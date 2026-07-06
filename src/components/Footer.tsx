@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Mail, Send, Phone, MapPin, Instagram, Facebook, Award, ShieldCheck, Heart } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './Logo';
+import { resolveApiUrl } from '../lib/api';
 
 interface FooterProps {
   onNavigate: (sectionId: string) => void;
@@ -25,7 +26,7 @@ export default function Footer({ onNavigate }: FooterProps) {
     setError('');
 
     try {
-      const response = await fetch('/api/newsletter', {
+      const response = await fetch(resolveApiUrl('/api/newsletter'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -10,7 +10,7 @@ import {
   Search, ShieldCheck, AlertTriangle, User, Lock, Unlock, Smartphone, Mail, MapPin, UserPlus,
   QrCode, Upload
 } from 'lucide-react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, resolveApiUrl } from '../lib/api';
 import LiveClasses from './LiveClasses';
 
 // Interfaces mirroring the backend
@@ -141,6 +141,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // App UI controlling states
   const [activeTab, setActiveTab] = useState<'overview' | 'courses' | 'classes' | 'assignments' | 'downloads' | 'analytics'>('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [supportMessageText, setSupportMessageText] = useState('');
 
   // Admin Passcode Lock system
@@ -301,7 +302,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // Fetch dynamic payment Settings (QR Code)
   const fetchPaymentSettings = async () => {
     try {
-      const res = await fetch('/api/payment/settings');
+      const res = await fetch(resolveApiUrl('/api/payment/settings'));
       if (res.ok) {
         const data = await res.json();
         setPaymentQrCodeUrl(data.qrCodeUrl || '');
@@ -366,7 +367,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/payment/settings', {
+      const res = await fetch(resolveApiUrl('/api/payment/settings'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -413,7 +414,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setQrSuccess('');
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/payment/settings', {
+      const res = await fetch(resolveApiUrl('/api/payment/settings'), {
         method: 'DELETE',
         headers: {
           'Authorization': token ? `Bearer ${token}` : ''
@@ -437,6 +438,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // Fetch full state from backend
   const fetchState = async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
       await fetchPaymentSettings();
       const url = '/api/academy/state';
@@ -469,8 +471,9 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
           setNewClassCourse(data.courses[0].title);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error loading academy state:", err);
+      setFetchError(err.message || "Failed to load academy records.");
     } finally {
       setIsLoading(false);
     }
@@ -646,7 +649,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setIsProcessingPayment(true);
 
     try {
-      const res = await fetch('/api/academy/payments/submit-utr', {
+      const res = await fetch(resolveApiUrl('/api/academy/payments/submit-utr'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -691,7 +694,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setIsProcessingPayment(true);
 
     try {
-      const res = await fetch('/api/academy/auth/verify-otp', {
+      const res = await fetch(resolveApiUrl('/api/academy/auth/verify-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -735,7 +738,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   const handleResendEnrollOtp = async () => {
     if (resendCooldown > 0) return;
     try {
-      const res = await fetch('/api/academy/auth/send-otp', {
+      const res = await fetch(resolveApiUrl('/api/academy/auth/send-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: studentPhone, isLogin: false })
@@ -755,7 +758,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // Admin Payment Approval / Rejection Handler
   const handleAdminPaymentAction = async (paymentId: string, action: 'approve' | 'reject') => {
     try {
-      const res = await fetch('/api/academy/admin/payments/action', {
+      const res = await fetch(resolveApiUrl('/api/academy/admin/payments/action'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paymentId, action })
@@ -777,7 +780,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // Admin Toggle Active / Assign Batch Handler
   const handleAdminStudentAction = async (userId: string, action: string, extra?: any) => {
     try {
-      const res = await fetch('/api/academy/admin/students/action', {
+      const res = await fetch(resolveApiUrl('/api/academy/admin/students/action'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, action, ...extra })
@@ -803,7 +806,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setSimulatedAuthOtp(null);
 
     try {
-      const res = await fetch('/api/auth/signup', {
+      const res = await fetch(resolveApiUrl('/api/auth/signup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(signupForm)
@@ -835,7 +838,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
         ? { passcode: adminPasscodeVal, rememberMe: true }
         : loginForm;
 
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(resolveApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -872,7 +875,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setAuthSuccessMsg('');
 
     try {
-      const res = await fetch('/api/auth/verify-otp-auth', {
+      const res = await fetch(resolveApiUrl('/api/auth/verify-otp-auth'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(verifyForm)
@@ -900,7 +903,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setAuthSuccessMsg('');
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
+      const res = await fetch(resolveApiUrl('/api/auth/forgot-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(forgotForm)
@@ -929,7 +932,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setAuthSuccessMsg('');
 
     try {
-      const res = await fetch('/api/auth/reset-password', {
+      const res = await fetch(resolveApiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(resetForm)
@@ -955,7 +958,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     localStorage.removeItem('token');
     setCurrentUser(null);
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch(resolveApiUrl('/api/auth/logout'), { method: 'POST' });
     } catch (e) {}
     showToast("Logged out successfully.");
     await fetchState();
@@ -971,7 +974,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
       const email = `${name.toLowerCase().replace(' ', '')}@gmail.com`;
       const avatar = `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 999999)}?w=120`;
 
-      const res = await fetch('/api/auth/google', {
+      const res = await fetch(resolveApiUrl('/api/auth/google'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, avatar })
@@ -996,7 +999,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     if (!phone) return;
 
     try {
-      const res = await fetch('/api/auth/resend-otp', {
+      const res = await fetch(resolveApiUrl('/api/auth/resend-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone })
@@ -1019,7 +1022,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/student/profile', {
+      const res = await fetch(resolveApiUrl('/api/student/profile'), {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -1051,7 +1054,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/student/change-password', {
+      const res = await fetch(resolveApiUrl('/api/student/change-password'), {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -1078,7 +1081,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   const handleLoadStudentDetail = async (userId: string) => {
     setLoadingStudentDetail(true);
     try {
-      const res = await fetch(`/api/admin/students/${userId}/detail`);
+      const res = await fetch(resolveApiUrl(`/api/admin/students/${userId}/detail`));
       if (res.ok) {
         const data = await res.json();
         setSelectedStudentDetail(data);
@@ -1097,7 +1100,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   const handleAdminResetPassword = async () => {
     if (!selectedStudentDetail) return;
     try {
-      const res = await fetch(`/api/admin/students/${selectedStudentDetail.user.id}/reset-password`, {
+      const res = await fetch(resolveApiUrl(`/api/admin/students/${selectedStudentDetail.user.id}/reset-password`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword: adminResetPassField || 'student123' })
@@ -1119,7 +1122,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     if (!confirmDel) return;
 
     try {
-      const res = await fetch(`/api/admin/students/${selectedStudentDetail.user.id}`, {
+      const res = await fetch(resolveApiUrl(`/api/admin/students/${selectedStudentDetail.user.id}`), {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -1166,7 +1169,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   const handleCompleteLesson = async (courseId: string, lessonId: string) => {
     if (!currentUser) return;
     try {
-      const res = await fetch('/api/academy/courses/lesson-complete', {
+      const res = await fetch(resolveApiUrl('/api/academy/courses/lesson-complete'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ courseId, lessonId, email: currentUser.email })
@@ -1189,7 +1192,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     setSubmittingHomework(true);
     setTimeout(async () => {
       try {
-        const res = await fetch('/api/academy/assignments/submit', {
+        const res = await fetch(resolveApiUrl('/api/academy/assignments/submit'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1221,7 +1224,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     if (!gradingSubmission || !currentUser) return;
 
     try {
-      const res = await fetch('/api/academy/assignments/grade', {
+      const res = await fetch(resolveApiUrl('/api/academy/assignments/grade'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1247,7 +1250,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     if (!currentUser) return;
 
     try {
-      const res = await fetch('/api/academy/classes/create', {
+      const res = await fetch(resolveApiUrl('/api/academy/classes/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1275,7 +1278,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   const handleClassAction = async (session: ScheduledClass, action: 'start' | 'join' | 'end') => {
     if (!currentUser) return;
     try {
-      const res = await fetch('/api/academy/classes/action', {
+      const res = await fetch(resolveApiUrl('/api/academy/classes/action'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1306,7 +1309,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
     if (!supportMessageText.trim() || !currentUser) return;
 
     try {
-      const res = await fetch('/api/academy/chat/send', {
+      const res = await fetch(resolveApiUrl('/api/academy/chat/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1430,7 +1433,35 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
           <RefreshCw className="w-8 h-8 text-[#D4AF37] animate-spin" />
           <p className="text-xs font-mono tracking-widest text-stone-500 uppercase">Synchronizing Institute Records...</p>
         </div>
-      ) : !localStorage.getItem('token') && (!currentUser || currentUser.role === 'Student') ? (
+      ) : fetchError ? (
+        <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto space-y-4">
+          <AlertTriangle className="w-12 h-12 text-[#D4AF37] animate-bounce" />
+          <h3 className="font-serif text-lg font-bold text-stone-800">Connection Delay</h3>
+          <p className="text-xs text-stone-500 font-sans leading-relaxed">
+            Failed to connect to Pearls Academy server. The backend server on Render might be waking up (Render servers sleep after inactivity). Please try again in a few moments.
+          </p>
+          <div className="flex gap-3 pt-2 w-full">
+            <button
+              onClick={() => { setFetchError(null); fetchState(); }}
+              className="flex-1 py-3 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Retry Connection</span>
+            </button>
+            <button
+              onClick={() => {
+                localStorage.removeItem('token');
+                setFetchError(null);
+                setCurrentUser(null);
+                fetchState();
+              }}
+              className="py-3 px-4 bg-stone-100 hover:bg-stone-200 text-stone-700 font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all border border-stone-200"
+            >
+              Reset Session
+            </button>
+          </div>
+        </div>
+      ) : !currentUser ? (
         <div className="flex-grow flex items-center justify-center p-4 md:p-12 overflow-y-auto">
           <motion.div 
             initial={{ opacity: 0, y: 15 }}
@@ -3373,11 +3404,11 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
                               
                               <div className="bg-white p-2.5 rounded-xl inline-block mx-auto shadow-md">
                                 <img 
-                                  src={paymentQrCodeUrl || "/src/assets/images/pratibha_ingole_1783095676300.jpg"} 
+                                  src={paymentQrCodeUrl || "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent("upi://pay?pa=pearlsacademy@upi&pn=Pearls%20Academy&cu=INR")} 
                                   alt="UPI Payment QR Code Preview" 
                                   className="w-32 h-32 object-contain mx-auto rounded-lg"
                                   referrerPolicy="no-referrer"
-                                  key={paymentQrCodeUrl}
+                                  key={paymentQrCodeUrl || "default_qr"}
                                 />
                               </div>
 
@@ -3829,7 +3860,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
                     
                     <div className="bg-white p-3 rounded-2xl inline-block mx-auto shadow-md">
                       <img 
-                        src={paymentQrCodeUrl || "/src/assets/images/pratibha_ingole_1783095676300.jpg"} 
+                        src={paymentQrCodeUrl || "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(`upi://pay?pa=pearlsacademy@upi&pn=Pearls%20Academy&am=${checkoutCourse.price}&cu=INR`)} 
                         alt="P.R. Ingole UPI QR Code" 
                         className="w-44 h-44 object-contain mx-auto rounded-xl"
                         referrerPolicy="no-referrer"
@@ -4729,7 +4760,7 @@ function LiveClassroomWindow({ session, user, onLeave }: ClassroomProps) {
     // 1. Fetch initial chat support
     const loadChat = async () => {
       try {
-        const res = await fetch(`/api/academy/chat?channel=${encodeURIComponent(session.meetingLink)}`);
+        const res = await fetch(resolveApiUrl(`/api/academy/chat?channel=${encodeURIComponent(session.meetingLink)}`));
         const data = await res.json();
         if (data) setMessagesList(data);
       } catch (err) {
@@ -4898,7 +4929,7 @@ function LiveClassroomWindow({ session, user, onLeave }: ClassroomProps) {
     if (!chatInputText.trim()) return;
 
     try {
-      const res = await fetch('/api/academy/chat/send', {
+      const res = await fetch(resolveApiUrl('/api/academy/chat/send'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
