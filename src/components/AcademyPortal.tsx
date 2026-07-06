@@ -3399,17 +3399,24 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
                             
                             <div className="w-full max-w-[220px] mt-4 bg-gradient-to-b from-[#111111] to-stone-900 text-white rounded-2xl p-4 border border-[#D4AF37]/30 text-center space-y-4 shadow-md">
                               <span className="bg-amber-100/10 text-[#D4AF37] text-[8px] font-mono font-bold tracking-widest uppercase px-2 py-0.5 rounded-full border border-[#D4AF37]/20">
-                                {paymentQrCodeUrl ? 'Dynamic Active QR' : 'Default Static Fallback'}
+                                {paymentQrCodeUrl ? 'Dynamic Active QR' : 'No QR Configured'}
                               </span>
                               
                               <div className="bg-white p-2.5 rounded-xl inline-block mx-auto shadow-md">
-                                <img 
-                                  src={paymentQrCodeUrl || "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent("upi://pay?pa=pearlsacademy@upi&pn=Pearls%20Academy&cu=INR")} 
-                                  alt="UPI Payment QR Code Preview" 
-                                  className="w-32 h-32 object-contain mx-auto rounded-lg"
-                                  referrerPolicy="no-referrer"
-                                  key={paymentQrCodeUrl || "default_qr"}
-                                />
+                                {paymentQrCodeUrl ? (
+                                  <img 
+                                    src={paymentQrCodeUrl} 
+                                    alt="UPI Payment QR Code Preview" 
+                                    className="w-32 h-32 object-contain mx-auto rounded-lg"
+                                    referrerPolicy="no-referrer"
+                                    key={paymentQrCodeUrl}
+                                  />
+                                ) : (
+                                  <div className="w-32 h-32 flex flex-col items-center justify-center bg-stone-50 text-stone-600 rounded-lg p-2 border border-dashed border-stone-300">
+                                    <QrCode className="w-6 h-6 text-[#D4AF37] mb-1 animate-pulse" />
+                                    <p className="text-[8px] font-mono leading-tight text-center">Awaiting QR Code Upload</p>
+                                  </div>
+                                )}
                               </div>
 
                               <div className="space-y-1 font-mono text-[8px]">
@@ -3427,7 +3434,7 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
                             {/* Info card underneath preview */}
                             <div className="mt-4 text-center space-y-1 px-2">
                               <span className="text-[10px] font-mono text-stone-500 block font-semibold">
-                                {paymentQrCodeUrl ? 'Source: Firebase Storage' : 'Source: Hardcoded Static Asset'}
+                                {paymentQrCodeUrl ? 'Source: Supabase Storage' : 'Source: Setup Required'}
                               </span>
                               {paymentQrCodeUpdatedAt && (
                                 <span className="text-[9px] font-mono text-stone-400 block">
@@ -3859,12 +3866,19 @@ export default function AcademyPortal({ onClose }: AcademyPortalProps) {
                     <div className="absolute top-0 right-0 w-20 h-20 bg-[#D4AF37]/5 rounded-full blur-xl" />
                     
                     <div className="bg-white p-3 rounded-2xl inline-block mx-auto shadow-md">
-                      <img 
-                        src={paymentQrCodeUrl || "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(`upi://pay?pa=pearlsacademy@upi&pn=Pearls%20Academy&am=${checkoutCourse.price}&cu=INR`)} 
-                        alt="P.R. Ingole UPI QR Code" 
-                        className="w-44 h-44 object-contain mx-auto rounded-xl"
-                        referrerPolicy="no-referrer"
-                      />
+                      {paymentQrCodeUrl ? (
+                        <img 
+                          src={paymentQrCodeUrl} 
+                          alt="P.R. Ingole UPI QR Code" 
+                          className="w-44 h-44 object-contain mx-auto rounded-xl"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-44 h-44 flex flex-col items-center justify-center bg-stone-50 text-stone-600 rounded-xl p-4 border border-dashed border-stone-300">
+                          <QrCode className="w-10 h-10 text-[#D4AF37] mb-2 animate-pulse" />
+                          <p className="text-[10px] font-mono leading-normal text-center font-bold">Awaiting QR Code Upload from Academy Portal</p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1.5 font-mono text-[10px]">
