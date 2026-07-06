@@ -122,10 +122,9 @@ interface Note {
 
 interface AcademyPortalProps {
   onClose: () => void;
-  userEmail?: string;
 }
 
-export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com' }: AcademyPortalProps) {
+export default function AcademyPortal({ onClose }: AcademyPortalProps) {
   // Global states loaded from server
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [courses, setCourses] = useState<AcademyCourse[]>([]);
@@ -140,7 +139,6 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   const [allUsers, setAllUsers] = useState<User[]>([]);
   
   // App UI controlling states
-  const [selectedRoleEmail, setSelectedRoleEmail] = useState(userEmail);
   const [activeTab, setActiveTab] = useState<'overview' | 'courses' | 'classes' | 'assignments' | 'downloads' | 'analytics'>('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [supportMessageText, setSupportMessageText] = useState('');
@@ -231,6 +229,8 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
 
   // Student Authentication system states
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'verify' | 'forgot' | 'reset'>('login');
+  const [adminPasscodeLogin, setAdminPasscodeLogin] = useState(false);
+  const [adminPasscodeVal, setAdminPasscodeVal] = useState('');
   const [signupForm, setSignupForm] = useState({
     name: '', email: '', phone: '', whatsapp: '', password: '', city: '', state: '', dob: '', gender: '', avatar: '', referralCode: ''
   });
@@ -435,12 +435,11 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   };
 
   // Fetch full state from backend
-  const fetchState = async (email?: string) => {
+  const fetchState = async () => {
     setIsLoading(true);
     try {
       await fetchPaymentSettings();
-      const token = localStorage.getItem('token');
-      const url = token ? '/api/academy/state' : `/api/academy/state?email=${encodeURIComponent(email || selectedRoleEmail || 'student@pearls.com')}`;
+      const url = '/api/academy/state';
       const data = await apiFetch(url);
       if (data) {
         if (data.token) {
@@ -478,13 +477,8 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
   };
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      fetchState();
-    } else {
-      fetchState(selectedRoleEmail);
-    }
-  }, [selectedRoleEmail]);
+    fetchState();
+  }, []);
 
   // Admin passcode verification loop
   useEffect(() => {
@@ -513,34 +507,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     }, 4000);
   };
 
-  // Switch role instant swap helper
-  const handleRoleSwap = async (email: string) => {
-    try {
-      const res = await fetch('/api/academy/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
-      if (data.success && data.token) {
-        localStorage.setItem('token', data.token);
-      }
-    } catch (e) {
-      console.error('Failed to update authentication token on role swap:', e);
-    }
 
-    const targetUser = allUsers.find(u => u.email === email);
-    if (targetUser && targetUser.role === 'Admin') {
-      setSelectedRoleEmail(email);
-      // It will automatically present the security lock screen if not unlocked yet
-    } else {
-      setSelectedRoleEmail(email);
-      setIsAdminUnlocked(false); // Relock when switching away from Admin
-      setPasscode('');
-      setPasscodeError(false);
-      showToast(`Logged in successfully as ${email.split('@')[0].toUpperCase()}`);
-    }
-  };
 
   // Helper: Retrieve subscription status for a course
   const getCourseSubscription = (courseId: string) => {
@@ -622,7 +589,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         setLoginSimulatedOtp(null);
         showToast("Login approved via WhatsApp verification.");
         // Log in this student
-        await handleRoleSwap(data.user.email);
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+        }
+        await fetchState();
       } else {
         setLoginOtpAttempts(prev => Math.max(0, prev - 1));
         setLoginError(data.error || "Invalid verification code.");
@@ -745,7 +715,10 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         showToast("Registration completed. Access pending verification.");
         
         // Log in as the student
-        await handleRoleSwap(data.user.email);
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+        }
+        await fetchState();
       } else {
         setOtpAttempts(prev => Math.max(0, prev - 1));
         setOtpError(data.error || "Incorrect OTP code.");
@@ -791,7 +764,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       if (res.ok && data.success) {
         showToast(`Transaction successfully ${action === 'approve' ? 'Approved' : 'Rejected'}!`);
         // Refresh state
-        await fetchState(selectedRoleEmail);
+        await fetchState();
       } else {
         showToast("Failed to perform admin operation.");
       }
@@ -811,7 +784,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       });
       if (res.ok) {
         showToast("Student database updated successfully.");
-        await fetchState(selectedRoleEmail);
+        await fetchState();
         if (selectedStudentDetail && selectedStudentDetail.user.id === userId) {
           // Refresh details modal
           await handleLoadStudentDetail(userId);
@@ -858,10 +831,14 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
     setAuthSuccessMsg('');
 
     try {
+      const payload = adminPasscodeLogin
+        ? { passcode: adminPasscodeVal, rememberMe: true }
+        : loginForm;
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -879,6 +856,8 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
 
       localStorage.setItem('token', data.token);
       showToast(`Welcome back, ${data.user.name}!`);
+      setAdminPasscodeVal('');
+      setAdminPasscodeLogin(false);
       await fetchState();
     } catch (err) {
       console.error(err);
@@ -979,7 +958,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch (e) {}
     showToast("Logged out successfully.");
-    await fetchState(selectedRoleEmail);
+    await fetchState();
   };
 
   // 7. Student Auth: Continue with Google (Simulated Popup Flow)
@@ -1147,7 +1126,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         showToast("Student account permanently deleted.");
         setShowStudentDetailModal(false);
         setSelectedStudentDetail(null);
-        await fetchState(selectedRoleEmail);
+        await fetchState();
       }
     } catch (err) {
       console.error(err);
@@ -1195,7 +1174,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       const data = await res.json();
       if (data.success) {
         showToast("Lesson progress updated!");
-        fetchState(currentUser.email);
+        fetchState();
       }
     } catch (err) {
       console.error(err);
@@ -1226,7 +1205,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
           setActiveAssignmentUpload(null);
           setUploadedFileName('');
           setUploadedFilePreview(false);
-          fetchState(currentUser.email);
+          fetchState();
         }
       } catch (err) {
         console.error(err);
@@ -1255,7 +1234,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
       if (data.success) {
         showToast(`Graded submission of ${gradingSubmission.userName}!`);
         setGradingSubmission(null);
-        fetchState(currentUser.email);
+        fetchState();
       }
     } catch (err) {
       console.error(err);
@@ -1285,7 +1264,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         showToast(`Successfully scheduled live class on ${newClassTopic}!`);
         setShowScheduleForm(false);
         setNewClassTopic('');
-        fetchState(currentUser.email);
+        fetchState();
       }
     } catch (err) {
       console.error(err);
@@ -1313,7 +1292,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
           showToast(`Connecting to high-fidelity live audio & video feed...`);
         } else if (action === 'end') {
           showToast(`Live session has been concluded. Recording saved.`);
-          fetchState(currentUser.email);
+          fetchState();
         }
       }
     } catch (err) {
@@ -1344,7 +1323,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
         // Instant local append for responsive UI
         setChatSupportList(prev => [...prev, data.message]);
         // Fast-poll state after brief timeout to capture AI response
-        setTimeout(() => fetchState(currentUser.email), 1500);
+        setTimeout(() => fetchState(), 1500);
       }
     } catch (err) {
       console.error(err);
@@ -1442,27 +1421,6 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
               Sign In / Register
             </button>
           )}
-
-          <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 p-1 rounded-full text-xs">
-            <span className="hidden xl:inline text-[9px] text-stone-500 font-mono uppercase tracking-wider px-3 font-bold">Simulator:</span>
-            {allUsers.slice(0, 3).map((roleUser) => (
-              <button
-                key={roleUser.id}
-                onClick={async () => {
-                  localStorage.removeItem('token'); // clear active JWT
-                  await handleRoleSwap(roleUser.email);
-                  showToast(`Swapped to simulation: ${roleUser.role}`);
-                }}
-                className={`px-3 py-1.5 rounded-full font-mono text-[10px] uppercase tracking-wider transition-all cursor-pointer font-semibold ${
-                  currentUser?.email === roleUser.email
-                    ? 'bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black shadow-sm'
-                    : 'text-stone-400 hover:text-white'
-                }`}
-              >
-                {roleUser.role}
-              </button>
-            ))}
-          </div>
         </div>
       </header>
 
@@ -1564,64 +1522,132 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
             {/* 1. LOGIN FORM */}
             {authMode === 'login' && (
               <form onSubmit={handleStudentLogin} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Email or Phone Number</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
-                    <input
-                      type="text"
-                      required
-                      placeholder="student@pearls.com or 9876543210"
-                      value={loginForm.emailOrPhone}
-                      onChange={(e) => setLoginForm({ ...loginForm, emailOrPhone: e.target.value })}
-                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
-                    />
-                  </div>
-                </div>
+                {adminPasscodeLogin ? (
+                  <div className="space-y-4">
+                    <div className="text-center space-y-1">
+                      <h4 className="text-sm font-semibold text-stone-800">Instructor Admin Access</h4>
+                      <p className="text-[11px] text-stone-500">Enter the 6-digit master passcode to sign in as Administrator</p>
+                    </div>
 
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Password</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold block text-center">6-Digit Admin Passcode</label>
+                      <div className="relative max-w-[200px] mx-auto">
+                        <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-[#AA7C11]" />
+                        <input
+                          type="password"
+                          required
+                          maxLength={6}
+                          placeholder="••••••"
+                          value={adminPasscodeVal}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            if (val.length <= 6) setAdminPasscodeVal(val);
+                          }}
+                          className="w-full bg-stone-50 border-2 border-[#D4AF37] pl-10 pr-4 py-3 text-center tracking-[0.5em] font-mono text-base font-bold rounded-xl focus:outline-none text-stone-900"
+                        />
+                      </div>
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccessMsg(''); }}
-                      className="text-[10px] font-mono tracking-wider text-[#AA7C11] uppercase hover:underline"
+                      type="submit"
+                      disabled={adminPasscodeVal.length !== 6}
+                      className="w-full py-3.5 bg-gradient-to-r from-[#D4AF37] to-[#AA7C11] text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Forgot?
+                      <Lock className="w-4 h-4" />
+                      <span>Authenticate & Access Panel</span>
                     </button>
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
-                    <input
-                      type="password"
-                      required
-                      placeholder="••••••••"
-                      value={loginForm.password}
-                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
-                    />
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-600 select-none">
-                    <input
-                      type="checkbox"
-                      checked={loginForm.rememberMe}
-                      onChange={(e) => setLoginForm({ ...loginForm, rememberMe: e.target.checked })}
-                      className="rounded border-stone-300 text-[#AA7C11] focus:ring-[#AA7C11]"
-                    />
-                    Keep me logged in (30 Days)
-                  </label>
-                </div>
+                    <div className="border-t border-stone-100 pt-4 mt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminPasscodeLogin(false);
+                          setAdminPasscodeVal('');
+                          setAuthError('');
+                        }}
+                        className="text-xs font-mono text-stone-500 hover:text-stone-800 flex items-center justify-center gap-1.5 mx-auto transition-colors"
+                      >
+                        <span>← Back to Student Sign In</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Email or Phone Number</label>
+                      <div className="relative">
+                        <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                        <input
+                          type="text"
+                          required
+                          placeholder="student@pearls.com or 9876543210"
+                          value={loginForm.emailOrPhone}
+                          onChange={(e) => setLoginForm({ ...loginForm, emailOrPhone: e.target.value })}
+                          className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                        />
+                      </div>
+                    </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 mt-4"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>Authenticate & Enter Portal</span>
-                </button>
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-mono tracking-wider text-stone-500 uppercase font-bold">Password</label>
+                        <button
+                          type="button"
+                          onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccessMsg(''); }}
+                          className="text-[10px] font-mono tracking-wider text-[#AA7C11] uppercase hover:underline"
+                        >
+                          Forgot?
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-stone-400" />
+                        <input
+                          type="password"
+                          required
+                          placeholder="••••••••"
+                          value={loginForm.password}
+                          onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                          className="w-full bg-stone-50 border border-stone-200 pl-10 pr-4 py-3 text-xs rounded-xl focus:outline-none focus:border-[#D4AF37] text-stone-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-600 select-none">
+                        <input
+                          type="checkbox"
+                          checked={loginForm.rememberMe}
+                          onChange={(e) => setLoginForm({ ...loginForm, rememberMe: e.target.checked })}
+                          className="rounded border-stone-300 text-[#AA7C11] focus:ring-[#AA7C11]"
+                        />
+                        Keep me logged in (30 Days)
+                      </label>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-3.5 bg-[#111111] hover:bg-[#AA7C11] text-[#D4AF37] hover:text-black font-mono text-xs uppercase tracking-widest font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 mt-4"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Authenticate & Enter Portal</span>
+                    </button>
+
+                    <div className="border-t border-stone-100 pt-4 mt-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminPasscodeLogin(true);
+                          setAdminPasscodeVal('');
+                          setAuthError('');
+                        }}
+                        className="text-xs font-mono text-[#AA7C11] hover:underline flex items-center justify-center gap-1.5 mx-auto transition-colors"
+                      >
+                        <span>🔐</span>
+                        <span className="font-semibold">Instructor / Admin Passcode Login</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </form>
             )}
 
@@ -3542,7 +3568,7 @@ export default function AcademyPortal({ onClose, userEmail = 'student@pearls.com
             user={currentUser!} 
             onLeave={() => {
               setActiveClassroomSession(null);
-              fetchState(selectedRoleEmail);
+              fetchState();
             }} 
           />
         )}

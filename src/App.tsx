@@ -155,7 +155,7 @@ export default function App() {
           {/* Academy Portal Overlay View */}
           <AnimatePresence>
             {showAcademy && (
-              <AcademyPortal onClose={() => setShowAcademy(false)} userEmail="student@pearls.com" />
+              <AcademyPortal onClose={() => setShowAcademy(false)} />
             )}
           </AnimatePresence>
         </motion.div>

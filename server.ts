@@ -79,6 +79,15 @@ try {
   } else {
     console.warn("Firebase credentials (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY) are missing from environment variables.");
     if (config.projectId) {
+      const firebaseAdmin = admin as any;
+      if (!firebaseAdmin.apps?.length) {
+        firebaseAdmin.initializeApp({
+          projectId: config.projectId,
+          storageBucket: config.storageBucket
+        });
+        console.log("Firebase Admin SDK initialized using config file with Project ID:", config.projectId);
+      }
+
       if (config.firestoreDatabaseId) {
         firestore = new Firestore({
           projectId: config.projectId,
@@ -160,15 +169,11 @@ const subscribers: string[] = [];
 // TAILORING ACADEMY STATE DATABASES & SEED
 // ==========================================
 
-let academyUsers = [
-  { id: 'u1', email: 'teacher@pearls.com', name: 'Pratibha Ingole (Owner)', role: 'Admin' as const, avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120', phone: '9123456789', whatsapp: '9123456789', city: 'Parbhani', state: 'Maharashtra', studentId: 'PE-ADMIN-01', active: true, batch: 'All Batches' },
-  { id: 'u2', email: 'student@pearls.com', name: 'Neha Sharma', role: 'Student' as const, avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120', phone: '9876543210', whatsapp: '9876543210', city: 'Parbhani', state: 'Maharashtra', studentId: 'PE-2026-0001', active: true, batch: 'Designer Suite Batch A' },
-  { id: 'u3', email: 'guest@pearls.com', name: 'Guest Designer', role: 'Guest' as const, avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', phone: '9999999999', whatsapp: '9999999999', city: 'Mumbai', state: 'Maharashtra', studentId: 'PE-GUEST-01', active: true, batch: 'Guest Batch' }
+let academyUsers: any[] = [
+  { id: 'u1', email: 'teacher@pearls.com', name: 'Pratibha Ingole (Owner)', role: 'Admin', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120', phone: '9123456789', whatsapp: '9123456789', city: 'Parbhani', state: 'Maharashtra', studentId: 'PE-ADMIN-01', active: true, batch: 'All Batches' }
 ];
 
-let academySubscriptions = [
-  { id: 'sub-1', userId: 'u2', courseId: 'c1', status: 'Active', purchasedAt: '2026-06-15', expiresAt: '2026-12-15' }
-];
+let academySubscriptions: any[] = [];
 
 let upiPayments = [
   {
@@ -367,15 +372,9 @@ let academyNotes = [
   { id: 'n3', courseTitle: 'Blouse Designing Special Course', title: 'Double Katori Layout Draft Printable Pattern', type: 'ZIP', downloadUrl: '#', size: '4.2 MB' }
 ];
 
-let notifications = [
-  { id: 'nt1', userEmail: 'student@pearls.com', title: 'Admission Confirmed', text: 'Congratulations! Your enrollment in Basic Dress Designing is confirmed. Invoice is ready.', date: 'June 15, 2026', read: false },
-  { id: 'nt2', userEmail: 'student@pearls.com', title: 'New Live Class Scheduled', text: 'Pratibha Ingole has scheduled: Princess Cut & Cups Padding Blueprint for today!', date: 'Today', read: false }
-];
+let notifications: any[] = [];
 
-let attendanceLogs = [
-  { id: 'at1', userEmail: 'student@pearls.com', courseTitle: 'Basic Dress Designing Course', topic: 'Sewing Machine Handling', status: 'Present', date: '2026-06-18' },
-  { id: 'at2', userEmail: 'student@pearls.com', courseTitle: 'Basic Dress Designing Course', topic: 'Body Drafting Calculations', status: 'Present', date: '2026-06-25' }
-];
+let attendanceLogs: any[] = [];
 
 // ==========================================
 // ACADEMY API ENDPOINTS
@@ -383,7 +382,7 @@ let attendanceLogs = [
 
 // 1. Get Global Academy State
 app.get("/api/academy/state", (req, res) => {
-  let email = req.query.email as string || 'student@pearls.com';
+  let user = null;
   
   const authHeader = req.headers['authorization'];
   if (authHeader) {
@@ -391,15 +390,35 @@ app.get("/api/academy/state", (req, res) => {
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       if (decoded && decoded.email) {
-        email = decoded.email;
+        user = academyUsers.find(u => u.email === decoded.email);
       }
     } catch (e) {
       // Token is invalid/expired
     }
   }
   
-  // Find current user profile
-  const user = academyUsers.find(u => u.email === email) || academyUsers[1];
+  // If there's no valid authenticated user, return user: null
+  if (!user) {
+    return res.json({
+      user: null,
+      token: null,
+      courses: academyCourses,
+      liveClasses: liveClasses.slice(0, 5),
+      enrollments: [],
+      assignments: [],
+      submissions: [],
+      notifications: [],
+      attendance: [],
+      notes: [],
+      chatSupport: [],
+      allUsers: [],
+      subscriptions: [],
+      allSubscriptions: [],
+      upiPayments: [],
+      loginHistory: [],
+      whatsappLogs: []
+    });
+  }
   
   // Filter records based on user context
   const myEnrollments = enrollments.filter(e => e.userEmail === user.email);
@@ -439,50 +458,9 @@ app.get("/api/academy/state", (req, res) => {
   });
 });
 
-// 2. Simple Role Swap/Auth API
+// 2. Simple Role Swap/Auth API (DISABLED for security)
 app.post("/api/academy/auth", (req, res) => {
-  const { email } = req.body;
-  const user = academyUsers.find(u => u.email === email);
-  if (!user) {
-    // Register new student
-    const newUser = {
-      id: `u-${Math.floor(1000 + Math.random() * 9000)}`,
-      email,
-      name: email.split('@')[0].toUpperCase(),
-      role: 'Student' as const,
-      joinedAt: new Date().toLocaleDateString(),
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
-      phone: '',
-      whatsapp: '',
-      city: '',
-      state: '',
-      studentId: `PE-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      active: true,
-      batch: 'Morning Batch (10 AM)'
-    };
-    academyUsers.push(newUser);
-    // Auto add custom welcome notification
-    notifications.unshift({
-      id: `nt-${Math.floor(Math.random() * 10000)}`,
-      userEmail: email,
-      title: 'Welcome to Pearls Academy',
-      text: 'Explore our catalog of courses. Click "Enroll" or simulate a checkout to start.',
-      date: 'Just now',
-      read: false
-    });
-    const token = jwt.sign(
-      { id: newUser.id, email: newUser.email, role: newUser.role },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-    return res.json({ success: true, user: newUser, token });
-  }
-  const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
-    JWT_SECRET,
-    { expiresIn: '30d' }
-  );
-  res.json({ success: true, user, token });
+  res.status(403).json({ error: "Demo authentication and role swapping has been permanently disabled." });
 });
 
 // 3. Class Scheduling
@@ -715,14 +693,10 @@ async function loadDB() {
       console.log("Loaded baseline local database.json successfully. Users count:", academyUsers.length);
     } else {
       console.log("No local baseline database.json found. Initializing with default datasets.");
-      // Seed default admin and student password hashes
+      // Seed default admin password hashes
       const adminUser = academyUsers.find(u => u.role === 'Admin');
       if (adminUser) {
         (adminUser as any).passwordHash = bcrypt.hashSync('admin123', 10);
-      }
-      const demoStudent = academyUsers.find(u => u.email === 'student@pearls.com');
-      if (demoStudent) {
-        (demoStudent as any).passwordHash = bcrypt.hashSync('student123', 10);
       }
     }
   } catch (err) {
@@ -813,6 +787,17 @@ async function loadDB() {
       console.error("Error restoring database from Firestore (will use local memory/file instead):", err);
     }
   }
+
+  // FORCE-CLEAN DEMO USERS AND ASSOCIATED MOCK DATA
+  academyUsers = academyUsers.filter(u => u.email !== 'student@pearls.com' && u.email !== 'guest@pearls.com');
+  enrollments = enrollments.filter(e => e.userEmail !== 'student@pearls.com' && e.userEmail !== 'guest@pearls.com');
+  submissions = submissions.filter(s => s.userEmail !== 'student@pearls.com' && s.userEmail !== 'guest@pearls.com');
+  notifications = notifications.filter(n => n.userEmail !== 'student@pearls.com' && n.userEmail !== 'guest@pearls.com');
+  attendanceLogs = attendanceLogs.filter(a => a.userEmail !== 'student@pearls.com' && a.userEmail !== 'guest@pearls.com');
+  academySubscriptions = academySubscriptions.filter(s => s.userId !== 'u2' && s.userId !== 'u3');
+
+  // Sync back to local file and Firestore so state is kept completely clean
+  saveDB();
 }
 
 // 1. Get all live classes
@@ -1573,78 +1558,40 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
     }
 
     let fileUrl = '';
-    let uploadSuccess = false;
-
-    // Check if Firebase Storage is initialized and available
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    if (fs.existsSync(configPath)) {
-      try {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        const firebaseAdmin = admin as any;
-        if (config.storageBucket && firebaseAdmin.apps?.length > 0) {
-          console.log("Uploading QR code to Firebase Storage bucket:", config.storageBucket);
-          const bucket = firebaseAdmin.storage().bucket(config.storageBucket);
-          const ext = finalMimeType.split('/')[1] || 'png';
-          const fileRef = bucket.file(`payment_qr_codes/qr_${Date.now()}.${ext}`);
-
-          const uuidToken = crypto.randomUUID();
-          await fileRef.save(buffer, {
-            metadata: {
-              contentType: finalMimeType,
-              cacheControl: 'public, max-age=31536000',
-              metadata: {
-                firebaseStorageDownloadTokens: uuidToken
-              }
-            }
-          });
-
-          // Generate the standard public web URL format for Firebase Storage download
-          fileUrl = `https://firebasestorage.googleapis.com/v0/b/${config.storageBucket}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
-
-          // Also attempt to get a far-future signed URL as an alternate highly robust format, if IAM permissions allow
-          try {
-            const [signedUrl] = await fileRef.getSignedUrl({
-              action: 'read',
-              expires: '03-01-2100'
-            });
-            fileUrl = signedUrl;
-          } catch (signedErr: any) {
-            console.warn("Could not generate signed URL (expected in sandbox without IAM signBlob), using standard media download token URL:", signedErr?.message || signedErr);
-          }
-
-          uploadSuccess = true;
-          console.log("Firebase Storage upload succeeded:", fileUrl);
-        }
-      } catch (storageErr) {
-        console.error("Firebase Storage upload failed, falling back to local storage:", storageErr);
-      }
+    if (!fs.existsSync(configPath)) {
+      throw new Error("firebase-applet-config.json configuration file is missing.");
     }
 
-    // Fallback: save locally
-    if (!uploadSuccess) {
-      console.log("Falling back to saving QR Code locally...");
-      const ext = finalMimeType.split('/')[1] || 'png';
-      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-      const localFileName = `qr_${Date.now()}.${ext}`;
-      const localFilePath = path.join(uploadsDir, localFileName);
-      fs.writeFileSync(localFilePath, buffer);
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const firebaseAdmin = admin as any;
 
-      // Also copy to dist/uploads if dist exists
-      const distPath = path.join(process.cwd(), 'dist');
-      if (fs.existsSync(distPath)) {
-        const distUploadsDir = path.join(distPath, 'uploads');
-        if (!fs.existsSync(distUploadsDir)) {
-          fs.mkdirSync(distUploadsDir, { recursive: true });
-        }
-        fs.writeFileSync(path.join(distUploadsDir, localFileName), buffer);
-      }
-
-      fileUrl = `/uploads/${localFileName}`;
-      console.log("Local fallback upload succeeded:", fileUrl);
+    if (!config.storageBucket) {
+      throw new Error("Firebase storageBucket configuration is not specified in config file.");
     }
+    if (!firebaseAdmin.apps?.length) {
+      throw new Error("Firebase Admin SDK is not initialized.");
+    }
+
+    console.log("Uploading QR code to Firebase Storage bucket:", config.storageBucket);
+    const bucket = firebaseAdmin.storage().bucket(config.storageBucket);
+    const ext = finalMimeType.split('/')[1] || 'png';
+    const fileRef = bucket.file(`payment_qr_codes/qr_${Date.now()}.${ext}`);
+
+    const uuidToken = crypto.randomUUID();
+    await fileRef.save(buffer, {
+      metadata: {
+        contentType: finalMimeType,
+        cacheControl: 'public, max-age=31536000',
+        metadata: {
+          firebaseStorageDownloadTokens: uuidToken
+        }
+      }
+    });
+
+    // Generate the standard permanent public download URL format
+    fileUrl = `https://firebasestorage.googleapis.com/v0/b/${config.storageBucket}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
+    console.log("Firebase Storage upload succeeded:", fileUrl);
 
     paymentSettings.qrCodeUrl = fileUrl;
     paymentSettings.updatedAt = new Date().toISOString();
@@ -1652,8 +1599,8 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
 
     res.json({ success: true, qrCodeUrl: fileUrl, updatedAt: paymentSettings.updatedAt });
   } catch (err: any) {
-    console.error("Error handling QR upload:", err);
-    res.status(500).json({ error: "Failed to upload and save QR code: " + (err?.message || err) });
+    console.error("Error handling QR upload to Firebase Storage:", err);
+    res.status(500).json({ error: "Failed to upload QR code to Firebase Storage: " + (err?.message || err) });
   }
 });
 
@@ -1846,7 +1793,31 @@ app.post("/api/auth/signup", (req, res) => {
 
 // 2. Login
 app.post("/api/auth/login", (req, res) => {
-  const { emailOrPhone, password, rememberMe } = req.body;
+  const { emailOrPhone, password, rememberMe, passcode } = req.body;
+
+  if (passcode === '885585') {
+    const adminUser = academyUsers.find(u => u.role === 'Admin');
+    if (!adminUser) {
+      return res.status(404).json({ error: "Admin account not found." });
+    }
+    const token = jwt.sign(
+      { id: adminUser.id, email: adminUser.email, role: adminUser.role },
+      JWT_SECRET,
+      { expiresIn: rememberMe ? '30d' : '1d' }
+    );
+    return res.json({
+      success: true,
+      user: {
+        id: adminUser.id,
+        email: adminUser.email,
+        name: adminUser.name,
+        role: adminUser.role,
+        avatar: adminUser.avatar,
+        studentId: adminUser.studentId
+      },
+      token
+    });
+  }
 
   if (!emailOrPhone || !password) {
     return res.status(400).json({ error: "Email/Phone and Password are required." });
