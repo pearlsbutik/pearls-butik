@@ -7,103 +7,15 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import crypto from "crypto";
-import { Firestore } from "@google-cloud/firestore";
-import * as admin from "firebase-admin";
+import { Firestore as GoogleFirestore } from "@google-cloud/firestore";
+import { Firestore as firestoreInstance, admin } from "./firebaseAdmin";
 
 dotenv.config();
 
-// Initialize Firestore dynamically using environment variables or fallback config
+// Initialize Firestore dynamically using the shared initialization
 let firestore: any = null;
 try {
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-  // Read local fallback config
-  let config: any = {};
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    try {
-      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    } catch (e) {
-      console.error("Failed to parse firebase-applet-config.json:", e);
-    }
-  }
-
-  const finalProjectId = projectId || config.projectId;
-  const databaseId = config.firestoreDatabaseId;
-
-  const hasEnvCredentials = !!(projectId && clientEmail && privateKey);
-
-  if (hasEnvCredentials) {
-    console.log("Checking and parsing Firebase Admin credentials from environment variables...");
-    // Trim and clean private key
-    let cleanPrivateKey = privateKey!.trim();
-    if (cleanPrivateKey.startsWith('"') && cleanPrivateKey.endsWith('"')) {
-      cleanPrivateKey = cleanPrivateKey.substring(1, cleanPrivateKey.length - 1);
-    }
-    if (cleanPrivateKey.startsWith("'") && cleanPrivateKey.endsWith("'")) {
-      cleanPrivateKey = cleanPrivateKey.substring(1, cleanPrivateKey.length - 1);
-    }
-    cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, "\n");
-
-    const isKeyValid = cleanPrivateKey.includes("-----BEGIN PRIVATE KEY-----") && cleanPrivateKey.includes("-----END PRIVATE KEY-----");
-
-    if (isKeyValid) {
-      const firebaseAdmin = admin as any;
-      if (!firebaseAdmin.apps?.length) {
-        firebaseAdmin.initializeApp({
-          credential: firebaseAdmin.credential.cert({
-            projectId: finalProjectId,
-            clientEmail: clientEmail!,
-            privateKey: cleanPrivateKey
-          })
-        });
-        console.log("Firebase Admin SDK initialized successfully with environment service account.");
-      }
-
-      // Initialize Firestore using service account credentials
-      firestore = new Firestore({
-        projectId: finalProjectId,
-        databaseId: databaseId || undefined,
-        credentials: {
-          client_email: clientEmail,
-          private_key: cleanPrivateKey
-        }
-      });
-      console.log("Firestore Node.js SDK initialized successfully with Service Account.");
-    } else {
-      console.error("Firebase credentials validation failed: FIREBASE_PRIVATE_KEY is not in valid PEM format (missing BEGIN/END headers).");
-      throw new Error("Invalid private key format in environment variables.");
-    }
-  } else {
-    console.warn("Firebase credentials (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY) are missing from environment variables.");
-    if (config.projectId) {
-      const firebaseAdmin = admin as any;
-      if (!firebaseAdmin.apps?.length) {
-        firebaseAdmin.initializeApp({
-          projectId: config.projectId,
-          storageBucket: config.storageBucket
-        });
-        console.log("Firebase Admin SDK initialized using config file with Project ID:", config.projectId);
-      }
-
-      if (config.firestoreDatabaseId) {
-        firestore = new Firestore({
-          projectId: config.projectId,
-          databaseId: config.firestoreDatabaseId
-        });
-        console.log("Firestore Node.js SDK initialized using config file with Project ID:", config.projectId, "Database ID:", config.firestoreDatabaseId);
-      } else {
-        firestore = new Firestore({
-          projectId: config.projectId
-        });
-        console.log("Firestore Node.js SDK initialized using config file with Project ID:", config.projectId);
-      }
-    } else {
-      console.log("No config file or environment credentials found, offline backup mode active (using local database.json)");
-    }
-  }
+  firestore = firestoreInstance;
 } catch (err: any) {
   console.error("Failed to initialize Firestore Node.js SDK, relying on local backup file:", err?.message || err);
 }
@@ -738,7 +650,7 @@ async function loadDB() {
           const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
           if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            firestore = new Firestore({
+            firestore = new GoogleFirestore({
               projectId: config.projectId
             });
             console.log("Re-initialized Firestore using the default database.");
@@ -1558,23 +1470,13 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
     }
 
     let fileUrl = '';
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) {
-      throw new Error("firebase-applet-config.json configuration file is missing.");
+    const { getStorage } = await import("firebase-admin/storage");
+    const bucket = getStorage().bucket();
+    if (!bucket) {
+      throw new Error("Firebase Storage bucket is missing or could not be retrieved from getStorage().bucket().");
     }
 
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    const firebaseAdmin = admin as any;
-
-    if (!config.storageBucket) {
-      throw new Error("Firebase storageBucket configuration is not specified in config file.");
-    }
-    if (!firebaseAdmin.apps?.length) {
-      throw new Error("Firebase Admin SDK is not initialized.");
-    }
-
-    console.log("Uploading QR code to Firebase Storage bucket:", config.storageBucket);
-    const bucket = firebaseAdmin.storage().bucket(config.storageBucket);
+    console.log("Uploading QR code to Firebase Storage bucket:", bucket.name);
     const ext = finalMimeType.split('/')[1] || 'png';
     const fileRef = bucket.file(`payment_qr_codes/qr_${Date.now()}.${ext}`);
 
@@ -1590,12 +1492,28 @@ app.post("/api/payment/settings", authenticateToken, async (req: any, res: any) 
     });
 
     // Generate the standard permanent public download URL format
-    fileUrl = `https://firebasestorage.googleapis.com/v0/b/${config.storageBucket}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
+    fileUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileRef.name)}?alt=media&token=${uuidToken}`;
     console.log("Firebase Storage upload succeeded:", fileUrl);
 
     paymentSettings.qrCodeUrl = fileUrl;
     paymentSettings.updatedAt = new Date().toISOString();
+    
+    // Save locally
     saveDB();
+
+    // Direct save to Firestore to guarantee immediate consistency and persistence
+    if (firestore) {
+      try {
+        const settingsDocRef = firestore.collection('pearls_db').doc('paymentSettings');
+        await settingsDocRef.set({
+          qrCodeUrl: fileUrl,
+          updatedAt: paymentSettings.updatedAt
+        });
+        console.log("Saved paymentSettings to Firestore successfully.");
+      } catch (fsErr: any) {
+        console.error("Error saving paymentSettings directly to Firestore:", fsErr);
+      }
+    }
 
     res.json({ success: true, qrCodeUrl: fileUrl, updatedAt: paymentSettings.updatedAt });
   } catch (err: any) {
